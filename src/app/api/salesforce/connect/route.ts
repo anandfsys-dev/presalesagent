@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
-import { SalesforceClient, encryptToken } from '@/lib/salesforce/client';
 import { NextResponse } from 'next/server';
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
 export async function POST(request: Request) {
   try {
@@ -12,118 +13,48 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, instance_url, username, password, security_token } = body;
+    const { name, instance_url, client_id, client_secret } = body;
 
     // Validate required fields
-    if (!name || !instance_url || !username || !password || !security_token) {
+    if (!name || !instance_url || !client_id || !client_secret) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing required fields: name, instance_url, client_id, client_secret' },
         { status: 400 }
       );
     }
 
-    // Authenticate with Salesforce
-    const authResponse = await SalesforceClient.authenticate(
-      username,
-      password,
-      security_token,
-      instance_url
-    );
+    // Store pending connection info (will be completed after OAuth callback)
+    // For now, we generate the OAuth authorization URL
 
-    // Create Salesforce client to get org info
-    const sfClient = new SalesforceClient(
-      authResponse.access_token,
-      authResponse.instance_url
-    );
+    const callbackUrl = `${APP_URL}/auth/callback`;
 
-    // Get organization info
-    let orgInfo;
-    let orgType: 'production' | 'sandbox' | 'developer' = 'production';
-
-    try {
-      orgInfo = await sfClient.getOrgInfo();
-      orgType = orgInfo.IsSandbox ? 'sandbox' : 'production';
-    } catch (error) {
-      console.error('Error fetching org info:', error);
-      // Continue without org info if it fails
-    }
-
-    // Extract org ID from the identity URL
-    const orgId = authResponse.id.split('/')[4];
-
-    // Check if connection with same org_id already exists
-    const { data: existingConnection } = await supabase
-      .from('connections')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('org_id', orgId)
-      .single();
-
-    if (existingConnection) {
-      // Update existing connection
-      const { error: updateError } = await supabase
-        .from('connections')
-        .update({
-          name,
-          instance_url: authResponse.instance_url,
-          access_token_encrypted: encryptToken(authResponse.access_token),
-          status: 'active',
-          last_connected: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingConnection.id);
-
-      if (updateError) {
-        throw new Error('Failed to update connection');
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Connection updated successfully',
-        connectionId: existingConnection.id,
-      });
-    }
-
-    // Check if this is the first connection (make it default)
-    const { count } = await supabase
-      .from('connections')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id);
-
-    const isDefault = (count || 0) === 0;
-
-    // Create new connection
-    const { data: newConnection, error: insertError } = await supabase
-      .from('connections')
-      .insert({
-        user_id: user.id,
+    // Build OAuth authorization URL
+    const authParams = new URLSearchParams({
+      response_type: 'code',
+      client_id: client_id,
+      redirect_uri: callbackUrl,
+      scope: 'api refresh_token full',
+      prompt: 'login consent',
+      state: JSON.stringify({
         name,
-        instance_url: authResponse.instance_url,
-        org_id: orgId,
-        org_type: orgType,
-        access_token_encrypted: encryptToken(authResponse.access_token),
-        refresh_token_encrypted: '', // No refresh token in password flow
-        status: 'active',
-        last_connected: new Date().toISOString(),
-        is_default: isDefault,
-      })
-      .select()
-      .single();
+        instance_url,
+        client_id,
+        client_secret_hint: client_secret.substring(0, 4), // Store hint for verification
+        user_id: user.id,
+      }),
+    });
 
-    if (insertError) {
-      console.error('Insert error:', insertError);
-      throw new Error('Failed to save connection');
-    }
+    const authUrl = `${instance_url}/services/oauth2/authorize?${authParams.toString()}`;
 
     return NextResponse.json({
       success: true,
-      message: 'Connection created successfully',
-      connectionId: newConnection.id,
+      authUrl,
+      message: 'Redirect to Salesforce to complete authentication',
     });
   } catch (error) {
-    console.error('Connection error:', error);
+    console.error('Salesforce connect error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to connect' },
+      { error: error instanceof Error ? error.message : 'Connection failed' },
       { status: 500 }
     );
   }

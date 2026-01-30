@@ -70,7 +70,7 @@ export async function executePipeline(
   };
 
   // Get steps in execution order
-  const orderedSteps = getExecutionOrder(config.steps);
+  const orderedSteps = getExecutionOrder(config);
 
   context.onLog({
     timestamp: new Date().toISOString(),
@@ -220,7 +220,7 @@ async function executeStep(
             deployment_id: context.deploymentId,
             step_id: step.id,
             step_order: step.order,
-            object_type: step.objectType,
+            object_type: step.apiName,
             object_name: String(lookupValue || `Record ${validRecords[j].index + 1}`),
             object_identifier: String(lookupValue || ''),
             salesforce_id: body.id,
@@ -245,7 +245,7 @@ async function executeStep(
             deployment_id: context.deploymentId,
             step_id: step.id,
             step_order: step.order,
-            object_type: step.objectType,
+            object_type: step.apiName,
             object_name: String(lookupValue || `Record ${validRecords[j].index + 1}`),
             object_identifier: String(lookupValue || ''),
             salesforce_id: null,
@@ -323,26 +323,30 @@ function transformRecord(
 
   // Resolve parent ID mappings
   for (const mapping of step.parentIdMappings) {
-    const lookupValue = record[mapping.sourceField];
+    const lookupValue = record[mapping.field];
 
     if (lookupValue && lookupValue !== '') {
-      const sourceIdMappings = idMappings[mapping.sourceStep];
+      const parentIdMappings = idMappings[mapping.parentStep];
 
-      if (sourceIdMappings) {
-        const parentId = sourceIdMappings[String(lookupValue)];
+      if (parentIdMappings) {
+        const parentId = parentIdMappings[String(lookupValue)];
 
         if (parentId) {
-          sfRecord[mapping.targetField] = parentId;
+          // Get the Salesforce field name from field mapping
+          const sfField = fieldMapping[mapping.field];
+          if (sfField) {
+            sfRecord[sfField] = parentId;
+          }
         } else {
           // Parent not found - this might be okay for self-referential hierarchies
           // where the parent hasn't been created yet
-          if (mapping.sourceStep !== step.id) {
+          if (mapping.parentStep !== step.id) {
             // Required parent from different step not found - skip record
             return null;
           }
         }
-      } else if (mapping.sourceStep !== step.id) {
-        // Source step has no mappings and it's not self-reference
+      } else if (mapping.parentStep !== step.id) {
+        // Parent step has no mappings and it's not self-reference
         return null;
       }
     }
@@ -393,7 +397,7 @@ function findWorksheetForStep(
 
   for (const [name, data] of worksheets) {
     const normalizedName = name.toLowerCase().replace(/[_\s-]/g, '');
-    if (normalizedName === normalizedStepName || normalizedName === step.objectType.toLowerCase()) {
+    if (normalizedName === normalizedStepName || normalizedName === step.apiName.toLowerCase()) {
       return data;
     }
   }
@@ -401,7 +405,7 @@ function findWorksheetForStep(
   // Try partial matching
   for (const [name, data] of worksheets) {
     const normalizedName = name.toLowerCase();
-    if (normalizedName.includes(step.objectType.toLowerCase())) {
+    if (normalizedName.includes(step.apiName.toLowerCase())) {
       return data;
     }
   }

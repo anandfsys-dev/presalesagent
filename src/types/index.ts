@@ -32,30 +32,35 @@ export interface SalesforceConnection {
 export interface ConnectionFormData {
   name: string;
   instance_url: string;
-  username: string;
-  password: string;
-  security_token: string;
+  client_id: string;
+  client_secret: string;
 }
 
 // Deployment Pipeline Types
 export interface PipelineStep {
   id: string;
   name: string;
-  apiName: string;
-  objectType: string;
-  description: string;
+  apiName: string; // Salesforce API name (e.g., Product2, Custom__c)
+  worksheetName: string; // CSV file name for this object
   order: number;
   dependsOn: string[]; // IDs of steps this depends on
-  idField: string; // Field that contains the ID after creation
+  columns: ColumnDefinition[]; // Column/field definitions
   parentIdMappings: ParentIdMapping[]; // How to map parent IDs
-  enabled: boolean;
+}
+
+export interface ColumnDefinition {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'date' | 'currency' | 'reference';
+  required: boolean;
+  description?: string;
+  defaultValue?: string;
+  referenceTo?: string; // For reference types, which object it references
 }
 
 export interface ParentIdMapping {
-  sourceStep: string; // Step ID to get parent ID from
-  sourceField: string; // Field in source that contains the lookup value
-  targetField: string; // Field in this object to set the parent ID
-  lookupField: string; // Field used to match (e.g., 'code', 'name')
+  field: string; // Field in this object that holds the reference
+  parentStep: string; // Step ID of the parent object
+  parentField: string; // Field in parent to match against (e.g., 'Id', 'External_Id__c')
 }
 
 export interface PipelineConfig {
