@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { encryptToken } from '@/lib/salesforce/client';
 import { NextResponse } from 'next/server';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -23,23 +24,21 @@ export async function POST(request: Request) {
       );
     }
 
-    // Store pending connection info (will be completed after OAuth callback)
-    // For now, we generate the OAuth authorization URL
-
-    const callbackUrl = `${APP_URL}/auth/callback`;
+    const callbackUrl = `${APP_URL}/api/auth/salesforce/callback`;
 
     // Build OAuth authorization URL
+    // Note: client_secret is encrypted in state for security
     const authParams = new URLSearchParams({
       response_type: 'code',
       client_id: client_id,
       redirect_uri: callbackUrl,
-      scope: 'api refresh_token full',
+      scope: 'api refresh_token openid',
       prompt: 'login consent',
       state: JSON.stringify({
         name,
         instance_url,
         client_id,
-        client_secret_hint: client_secret.substring(0, 4), // Store hint for verification
+        client_secret_encrypted: encryptToken(client_secret),
         user_id: user.id,
       }),
     });
