@@ -18,7 +18,7 @@ export function ObjectDataTable({ step, expanded = false, onToggle }: ObjectData
   const [editingEntry, setEditingEntry] = useState<DataEntry | undefined>();
 
   const entries = state[step.id as keyof ConfigDataState] || [];
-  const displayColumns = step.columns.filter(c => c.required || entries.some(e => (e as Record<string, unknown>)[c.name] !== undefined));
+  const displayColumns = step.columns.filter(c => c.required || entries.some(e => (e as unknown as Record<string, unknown>)[c.name] !== undefined));
 
   const handleAdd = () => {
     setEditingEntry(undefined);
@@ -79,37 +79,39 @@ export function ObjectDataTable({ step, expanded = false, onToggle }: ObjectData
 
   return (
     <Card className={`transition-all ${expanded ? 'ring-2 ring-black' : ''}`}>
-      <CardHeader
-        className="cursor-pointer hover:bg-gray-50 transition-colors"
+      <button
         onClick={onToggle}
+        className="w-full text-left cursor-pointer hover:bg-gray-50 transition-colors"
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-              entries.length > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-            }`}>
-              {step.order}
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                entries.length > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+              }`}>
+                {step.order}
+              </div>
+              <div>
+                <CardTitle className="text-lg">{step.name}</CardTitle>
+                <p className="text-sm text-gray-500">{step.apiName}</p>
+              </div>
             </div>
-            <div>
-              <CardTitle className="text-lg">{step.name}</CardTitle>
-              <p className="text-sm text-gray-500">{step.apiName}</p>
+            <div className="flex items-center gap-3">
+              <Badge variant={entries.length > 0 ? 'success' : 'default'}>
+                {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+              </Badge>
+              <svg
+                className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Badge variant={entries.length > 0 ? 'success' : 'default'}>
-              {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
-            </Badge>
-            <svg
-              className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-      </CardHeader>
+        </CardHeader>
+      </button>
 
       {expanded && (
         <CardContent className="border-t">
@@ -170,7 +172,7 @@ export function ObjectDataTable({ step, expanded = false, onToggle }: ObjectData
                     <tr key={entry._id} className="border-b hover:bg-gray-50">
                       {displayColumns.slice(0, 5).map(col => (
                         <td key={col.name} className="px-3 py-2">
-                          {formatCellValue((entry as Record<string, unknown>)[col.name], col.name)}
+                          {formatCellValue((entry as unknown as Record<string, unknown>)[col.name], col.name)}
                         </td>
                       ))}
                       <td className="px-3 py-2 text-right">

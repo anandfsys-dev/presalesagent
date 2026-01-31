@@ -95,7 +95,7 @@ export function EntryForm({ stepId, columns, entry, onSubmit, onCancel }: EntryF
       processedData._id = entry._id;
     }
 
-    onSubmit(processedData as DataEntry);
+    onSubmit(processedData as unknown as DataEntry);
   };
 
   const renderField = (col: ColumnDefinition) => {

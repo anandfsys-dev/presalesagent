@@ -344,7 +344,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
         const data = entries.map((entry: DataEntry) => {
           const record: Record<string, unknown> = {};
           for (const col of columns) {
-            record[col] = (entry as Record<string, unknown>)[col];
+            record[col] = (entry as unknown as Record<string, unknown>)[col];
           }
           return record;
         });
