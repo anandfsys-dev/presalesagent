@@ -1,8 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useCallback, useMemo, useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { DEFAULT_PIPELINE_CONFIG, getStepsByCategory } from '@/lib/pipeline/config';
-import type { PipelineStep, ColumnDefinition } from '@/types';
+import type { PipelineStep, ColumnDefinition, PipelineConfig } from '@/types';
 
 const STORAGE_KEY = 'salesforce-rca-config-data';
 
@@ -19,9 +20,9 @@ export type ConfigDataState = {
 };
 
 // Initialize state from pipeline config
-function createInitialState(): ConfigDataState {
+function createInitialState(config: PipelineConfig): ConfigDataState {
   const state: ConfigDataState = {};
-  for (const step of DEFAULT_PIPELINE_CONFIG.steps) {
+  for (const step of config.steps) {
     state[step.id] = [];
   }
   return state;
@@ -63,9 +64,9 @@ type ConfigDataAction =
   | { type: 'UPDATE_ENTRY'; stepId: string; id: string; entry: Partial<DataEntry> }
   | { type: 'DELETE_ENTRY'; stepId: string; id: string }
   | { type: 'SET_ENTRIES'; stepId: string; entries: DataEntry[] }
-  | { type: 'CLEAR_ALL' }
+  | { type: 'CLEAR_ALL'; config: PipelineConfig }
   | { type: 'LOAD_DATA'; data: Partial<ConfigDataState> }
-  | { type: 'IMPORT_DATA'; data: ConfigDataState };
+  | { type: 'IMPORT_DATA'; data: ConfigDataState; config: PipelineConfig };
 
 // Reducer
 function configDataReducer(state: ConfigDataState, action: ConfigDataAction): ConfigDataState {
@@ -95,7 +96,7 @@ function configDataReducer(state: ConfigDataState, action: ConfigDataAction): Co
         [action.stepId]: action.entries,
       };
     case 'CLEAR_ALL':
-      return createInitialState();
+      return createInitialState(action.config);
     case 'LOAD_DATA': {
       const newState = { ...state };
       for (const [key, value] of Object.entries(action.data)) {
@@ -106,8 +107,8 @@ function configDataReducer(state: ConfigDataState, action: ConfigDataAction): Co
       return newState;
     }
     case 'IMPORT_DATA': {
-      // Merge imported data with initial state structure
-      const newState = createInitialState();
+      // Merge imported data with initial state structure from current config
+      const newState = createInitialState(action.config);
       for (const [key, value] of Object.entries(action.data)) {
         if (Array.isArray(value)) {
           newState[key] = value;
@@ -130,7 +131,7 @@ export interface ExportData {
 // Context type
 interface ConfigDataContextType {
   state: ConfigDataState;
-  pipelineConfig: typeof DEFAULT_PIPELINE_CONFIG;
+  pipelineConfig: PipelineConfig;
   stepsByCategory: Record<string, PipelineStep[]>;
   addEntry: (stepId: string, entry: Omit<DataEntry, '_id' | '_stepId'>) => string;
   updateEntry: (stepId: string, id: string, entry: Partial<DataEntry>) => void;
@@ -146,6 +147,7 @@ interface ConfigDataContextType {
   getEntryCountByStep: (stepId: string) => number;
   convertToDeploymentPayload: () => DeploymentPayload;
   isHydrated: boolean;
+  refreshPipelineConfig: () => Promise<void>;
 }
 
 // Deployment payload structure
@@ -174,18 +176,69 @@ function generateId(): string {
 
 // Provider component
 export function ConfigDataProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(configDataReducer, null, createInitialState);
+  const supabase = createClient();
+  const [pipelineConfig, setPipelineConfig] = useState<PipelineConfig>(DEFAULT_PIPELINE_CONFIG);
+  const [state, dispatch] = useReducer(
+    configDataReducer,
+    DEFAULT_PIPELINE_CONFIG,
+    createInitialState
+  );
   const [isHydrated, setIsHydrated] = useState(false);
-  const stepsByCategory = useMemo(() => getStepsByCategory(DEFAULT_PIPELINE_CONFIG), []);
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    const storedState = loadStateFromStorage();
-    if (storedState) {
-      dispatch({ type: 'IMPORT_DATA', data: storedState });
+  const stepsByCategory = useMemo(() => getStepsByCategory(pipelineConfig), [pipelineConfig]);
+
+  // Load pipeline config from Supabase
+  const loadPipelineConfig = useCallback(async (): Promise<PipelineConfig> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return DEFAULT_PIPELINE_CONFIG;
+      }
+
+      const { data } = await supabase
+        .from('pipeline_configs')
+        .select('config')
+        .eq('user_id', user.id)
+        .order('is_default', { ascending: false })
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (data && data.length > 0 && data[0].config) {
+        return data[0].config as PipelineConfig;
+      }
+    } catch (error) {
+      console.log('Using default pipeline config:', error);
     }
-    setIsHydrated(true);
-  }, []);
+    return DEFAULT_PIPELINE_CONFIG;
+  }, [supabase]);
+
+  // Refresh pipeline config (can be called when config changes)
+  const refreshPipelineConfig = useCallback(async () => {
+    const config = await loadPipelineConfig();
+    setPipelineConfig(config);
+  }, [loadPipelineConfig]);
+
+  // Load pipeline config and data from localStorage on mount
+  useEffect(() => {
+    const initialize = async () => {
+      // Load pipeline config from Supabase
+      const config = await loadPipelineConfig();
+      setPipelineConfig(config);
+
+      // Load data from localStorage
+      const storedState = loadStateFromStorage();
+      if (storedState) {
+        dispatch({ type: 'IMPORT_DATA', data: storedState, config });
+      } else {
+        // Initialize with empty state based on loaded config
+        dispatch({ type: 'IMPORT_DATA', data: {}, config });
+      }
+
+      setIsHydrated(true);
+    };
+
+    initialize();
+  }, [loadPipelineConfig]);
 
   // Save to localStorage whenever state changes (after hydration)
   useEffect(() => {
@@ -214,16 +267,16 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const clearAll = useCallback(() => {
-    dispatch({ type: 'CLEAR_ALL' });
-  }, []);
+    dispatch({ type: 'CLEAR_ALL', config: pipelineConfig });
+  }, [pipelineConfig]);
 
   const loadData = useCallback((data: Partial<ConfigDataState>) => {
     dispatch({ type: 'LOAD_DATA', data });
   }, []);
 
   const importData = useCallback((data: ConfigDataState) => {
-    dispatch({ type: 'IMPORT_DATA', data });
-  }, []);
+    dispatch({ type: 'IMPORT_DATA', data, config: pipelineConfig });
+  }, [pipelineConfig]);
 
   const exportData = useCallback((): ExportData => {
     return {
@@ -234,8 +287,8 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
   }, [state]);
 
   const getStepConfig = useCallback((stepId: string) => {
-    return DEFAULT_PIPELINE_CONFIG.steps.find(s => s.id === stepId);
-  }, []);
+    return pipelineConfig.steps.find(s => s.id === stepId);
+  }, [pipelineConfig]);
 
   // Get reference options for dropdown fields
   const getReferenceOptions = useCallback((stepId: string, column: ColumnDefinition): { value: string; label: string }[] => {
@@ -243,7 +296,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
 
     const refStepId = column.referenceTo;
     const refEntries = state[refStepId] || [];
-    const refStep = getStepConfig(refStepId);
+    const refStep = pipelineConfig.steps.find(s => s.id === refStepId);
 
     if (!refStep) return [];
 
@@ -254,7 +307,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
       value: e._id,
       label: (e[displayField] as string) || e._id,
     }));
-  }, [state, getStepConfig]);
+  }, [state, pipelineConfig]);
 
   const getTotalEntryCount = useCallback(() => {
     return Object.values(state).reduce((total, entries) => total + entries.length, 0);
@@ -268,7 +321,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
   const convertToDeploymentPayload = useCallback((): DeploymentPayload => {
     const steps: DeploymentPayload['steps'] = [];
 
-    for (const step of DEFAULT_PIPELINE_CONFIG.steps) {
+    for (const step of pipelineConfig.steps) {
       const entries = state[step.id] || [];
       if (entries.length === 0) continue;
 
@@ -311,11 +364,11 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
         stepCount: steps.length,
       },
     };
-  }, [state, getTotalEntryCount]);
+  }, [state, pipelineConfig, getTotalEntryCount]);
 
   const value = useMemo(() => ({
     state,
-    pipelineConfig: DEFAULT_PIPELINE_CONFIG,
+    pipelineConfig,
     stepsByCategory,
     addEntry,
     updateEntry,
@@ -331,7 +384,8 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     getEntryCountByStep,
     convertToDeploymentPayload,
     isHydrated,
-  }), [state, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, importData, exportData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload, isHydrated]);
+    refreshPipelineConfig,
+  }), [state, pipelineConfig, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, importData, exportData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload, isHydrated, refreshPipelineConfig]);
 
   return (
     <ConfigDataContext.Provider value={value}>
