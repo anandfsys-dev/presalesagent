@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -14,7 +14,7 @@ import {
   Select,
   Input,
 } from '@/components/ui';
-import { ConfigDataProvider, useConfigData, DataEntry } from '@/contexts/ConfigDataContext';
+import { useConfigData, DataEntry, ExportData } from '@/contexts/ConfigDataContext';
 import type { SalesforceConnection, PipelineStep, ColumnDefinition } from '@/types';
 
 // Entry Form Component
@@ -303,16 +303,19 @@ function StepPanel({ step }: { step: PipelineStep }) {
 }
 
 // Main Data Entry Content
-function DataEntryContent() {
+export default function DataEntryPage() {
   const router = useRouter();
   const supabase = createClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     state,
     pipelineConfig,
     stepsByCategory,
     getTotalEntryCount,
     clearAll,
-    convertToDeploymentPayload,
+    exportData,
+    importData,
+    isHydrated,
   } = useConfigData();
 
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
@@ -346,36 +349,96 @@ function DataEntryContent() {
 
   const handleDeploy = () => {
     if (!selectedConnection) return;
-
-    const payload = convertToDeploymentPayload();
-
-    sessionStorage.setItem('deploymentData', JSON.stringify({
-      connectionId: selectedConnection,
-      payload,
-    }));
-
     router.push('/dashboard/deployment');
   };
 
   const handleClear = () => {
     if (confirm('Are you sure you want to clear all data? This cannot be undone.')) {
       clearAll();
+      setStatusMessage({ type: 'success', message: 'All data cleared successfully.' });
     }
   };
 
   const handleExportJSON = () => {
-    const payload = convertToDeploymentPayload();
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const data = exportData();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `deployment-config-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `salesforce-config-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    setStatusMessage({ type: 'success', message: 'Data exported successfully.' });
   };
+
+  const handleImportJSON = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const imported: ExportData = JSON.parse(text);
+
+      // Validate the imported data
+      if (!imported.data || typeof imported.data !== 'object') {
+        throw new Error('Invalid file format: missing data property');
+      }
+
+      // Import the data
+      importData(imported.data);
+
+      // Count imported entries
+      let count = 0;
+      for (const entries of Object.values(imported.data)) {
+        if (Array.isArray(entries)) {
+          count += entries.length;
+        }
+      }
+
+      setStatusMessage({
+        type: 'success',
+        message: `Successfully imported ${count} entries from ${file.name}`,
+      });
+    } catch (error) {
+      setStatusMessage({
+        type: 'error',
+        message: `Failed to import: ${error instanceof Error ? error.message : 'Invalid JSON file'}`,
+      });
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Show loading state while hydrating from localStorage
+  if (!isHydrated) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading saved data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+      {/* Hidden file input for import */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".json"
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -390,7 +453,10 @@ function DataEntryContent() {
       </div>
 
       {statusMessage && (
-        <Alert variant={statusMessage.type === 'error' ? 'error' : 'success'}>
+        <Alert
+          variant={statusMessage.type === 'error' ? 'error' : 'success'}
+          onClose={() => setStatusMessage(null)}
+        >
           {statusMessage.message}
         </Alert>
       )}
@@ -428,6 +494,12 @@ function DataEntryContent() {
       {/* Controls */}
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleImportJSON}>
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Import JSON
+          </Button>
           <Button variant="outline" size="sm" onClick={handleExportJSON} disabled={totalEntries === 0}>
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -496,15 +568,11 @@ function DataEntryContent() {
           </CardContent>
         </Card>
       )}
-    </div>
-  );
-}
 
-// Main page component with provider
-export default function DataEntryPage() {
-  return (
-    <ConfigDataProvider>
-      <DataEntryContent />
-    </ConfigDataProvider>
+      {/* Auto-save indicator */}
+      <div className="text-center text-sm text-gray-500">
+        Data is automatically saved to your browser. Use Export JSON to back up your work.
+      </div>
+    </div>
   );
 }

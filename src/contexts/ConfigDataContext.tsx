@@ -1,8 +1,10 @@
 'use client';
 
-import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useMemo, useEffect, useState } from 'react';
 import { DEFAULT_PIPELINE_CONFIG, getStepsByCategory } from '@/lib/pipeline/config';
 import type { PipelineStep, ColumnDefinition } from '@/types';
+
+const STORAGE_KEY = 'salesforce-rca-config-data';
 
 // Generic entry type that works with any step
 export interface DataEntry {
@@ -25,6 +27,36 @@ function createInitialState(): ConfigDataState {
   return state;
 }
 
+// Load state from localStorage
+function loadStateFromStorage(): ConfigDataState | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Validate the structure
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load state from localStorage:', error);
+  }
+  return null;
+}
+
+// Save state to localStorage
+function saveStateToStorage(state: ConfigDataState): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.error('Failed to save state to localStorage:', error);
+  }
+}
+
 // Action types
 type ConfigDataAction =
   | { type: 'ADD_ENTRY'; stepId: string; entry: DataEntry }
@@ -32,7 +64,8 @@ type ConfigDataAction =
   | { type: 'DELETE_ENTRY'; stepId: string; id: string }
   | { type: 'SET_ENTRIES'; stepId: string; entries: DataEntry[] }
   | { type: 'CLEAR_ALL' }
-  | { type: 'LOAD_DATA'; data: Partial<ConfigDataState> };
+  | { type: 'LOAD_DATA'; data: Partial<ConfigDataState> }
+  | { type: 'IMPORT_DATA'; data: ConfigDataState };
 
 // Reducer
 function configDataReducer(state: ConfigDataState, action: ConfigDataAction): ConfigDataState {
@@ -72,9 +105,26 @@ function configDataReducer(state: ConfigDataState, action: ConfigDataAction): Co
       }
       return newState;
     }
+    case 'IMPORT_DATA': {
+      // Merge imported data with initial state structure
+      const newState = createInitialState();
+      for (const [key, value] of Object.entries(action.data)) {
+        if (Array.isArray(value)) {
+          newState[key] = value;
+        }
+      }
+      return newState;
+    }
     default:
       return state;
   }
+}
+
+// Export data format (for Import/Export)
+export interface ExportData {
+  version: string;
+  exportedAt: string;
+  data: ConfigDataState;
 }
 
 // Context type
@@ -88,11 +138,14 @@ interface ConfigDataContextType {
   setEntries: (stepId: string, entries: DataEntry[]) => void;
   clearAll: () => void;
   loadData: (data: Partial<ConfigDataState>) => void;
+  importData: (data: ConfigDataState) => void;
+  exportData: () => ExportData;
   getStepConfig: (stepId: string) => PipelineStep | undefined;
   getReferenceOptions: (stepId: string, column: ColumnDefinition) => { value: string; label: string }[];
   getTotalEntryCount: () => number;
   getEntryCountByStep: (stepId: string) => number;
   convertToDeploymentPayload: () => DeploymentPayload;
+  isHydrated: boolean;
 }
 
 // Deployment payload structure
@@ -122,7 +175,24 @@ function generateId(): string {
 // Provider component
 export function ConfigDataProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(configDataReducer, null, createInitialState);
+  const [isHydrated, setIsHydrated] = useState(false);
   const stepsByCategory = useMemo(() => getStepsByCategory(DEFAULT_PIPELINE_CONFIG), []);
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    const storedState = loadStateFromStorage();
+    if (storedState) {
+      dispatch({ type: 'IMPORT_DATA', data: storedState });
+    }
+    setIsHydrated(true);
+  }, []);
+
+  // Save to localStorage whenever state changes (after hydration)
+  useEffect(() => {
+    if (isHydrated) {
+      saveStateToStorage(state);
+    }
+  }, [state, isHydrated]);
 
   const addEntry = useCallback((stepId: string, entry: Omit<DataEntry, '_id' | '_stepId'>): string => {
     const id = generateId();
@@ -150,6 +220,18 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
   const loadData = useCallback((data: Partial<ConfigDataState>) => {
     dispatch({ type: 'LOAD_DATA', data });
   }, []);
+
+  const importData = useCallback((data: ConfigDataState) => {
+    dispatch({ type: 'IMPORT_DATA', data });
+  }, []);
+
+  const exportData = useCallback((): ExportData => {
+    return {
+      version: '1.0.0',
+      exportedAt: new Date().toISOString(),
+      data: state,
+    };
+  }, [state]);
 
   const getStepConfig = useCallback((stepId: string) => {
     return DEFAULT_PIPELINE_CONFIG.steps.find(s => s.id === stepId);
@@ -194,12 +276,14 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
       const sfEntries = entries.map(entry => {
         const sfEntry: Record<string, unknown> = {};
 
+        // Store internal ID for reference resolution
+        sfEntry._internalId = entry._id;
+
         for (const col of step.columns) {
           const value = entry[col.name];
           if (value !== undefined && value !== null && value !== '') {
-            // For reference fields, resolve the ID
+            // For reference fields, store the internal ID (will be resolved during deployment)
             if (col.type === 'reference' && col.referenceTo) {
-              // Store the reference value - will be resolved during deployment
               sfEntry[col.sfField || col.name] = value;
             } else {
               sfEntry[col.sfField || col.name] = value;
@@ -239,12 +323,15 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     setEntries,
     clearAll,
     loadData,
+    importData,
+    exportData,
     getStepConfig,
     getReferenceOptions,
     getTotalEntryCount,
     getEntryCountByStep,
     convertToDeploymentPayload,
-  }), [state, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload]);
+    isHydrated,
+  }), [state, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, importData, exportData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload, isHydrated]);
 
   return (
     <ConfigDataContext.Provider value={value}>
