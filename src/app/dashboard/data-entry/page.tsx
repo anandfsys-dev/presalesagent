@@ -150,7 +150,7 @@ function EntryForm({
 }
 
 // Step Panel Component
-function StepPanel({ step }: { step: PipelineStep }) {
+function StepPanel({ step, isHighlighted }: { step: PipelineStep; isHighlighted?: boolean }) {
   const { state, addEntry, updateEntry, deleteEntry, getEntryCountByStep, getReferenceOptions } = useConfigData();
   const [isExpanded, setIsExpanded] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -199,12 +199,12 @@ function StepPanel({ step }: { step: PipelineStep }) {
   };
 
   return (
-    <Card className="overflow-hidden">
+    <Card className={`overflow-hidden ${isHighlighted ? 'ring-2 ring-yellow-400 bg-yellow-50' : ''}`}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full text-left"
       >
-        <CardHeader className="flex flex-row items-center justify-between py-3 px-4 hover:bg-gray-50 transition-colors">
+        <CardHeader className={`flex flex-row items-center justify-between py-3 px-4 hover:bg-gray-50 transition-colors ${isHighlighted ? 'bg-yellow-50' : ''}`}>
           <div className="flex items-center gap-3">
             <svg
               className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
@@ -218,6 +218,11 @@ function StepPanel({ step }: { step: PipelineStep }) {
             <Badge variant={count > 0 ? 'success' : 'default'}>
               {count}
             </Badge>
+            {isHighlighted && (
+              <Badge variant="warning">
+                Schema Updated
+              </Badge>
+            )}
           </div>
           <span className="text-xs text-gray-500">{step.apiName}</span>
         </CardHeader>
@@ -316,6 +321,8 @@ export default function DataEntryPage() {
     exportData,
     importData,
     isHydrated,
+    recentlyChangedSteps,
+    clearRecentlyChangedSteps,
   } = useConfigData();
 
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
@@ -517,6 +524,16 @@ export default function DataEntryPage() {
         </div>
       </div>
 
+      {/* Notification for schema updates */}
+      {recentlyChangedSteps.length > 0 && (
+        <Alert
+          variant="warning"
+          onClose={clearRecentlyChangedSteps}
+        >
+          Pipeline configuration has been updated. The highlighted sections below have schema changes.
+        </Alert>
+      )}
+
       {/* Data Entry Sections by Category */}
       {Object.entries(stepsByCategory).map(([category, steps]) => (
         <div key={category} className="space-y-3">
@@ -526,7 +543,11 @@ export default function DataEntryPage() {
           </h2>
           <div className="space-y-2 ml-4">
             {steps.map(step => (
-              <StepPanel key={step.id} step={step} />
+              <StepPanel
+                key={step.id}
+                step={step}
+                isHighlighted={recentlyChangedSteps.includes(step.id)}
+              />
             ))}
           </div>
         </div>

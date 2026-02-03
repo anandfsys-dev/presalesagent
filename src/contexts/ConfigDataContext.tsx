@@ -148,6 +148,10 @@ interface ConfigDataContextType {
   convertToDeploymentPayload: () => DeploymentPayload;
   isHydrated: boolean;
   refreshPipelineConfig: () => Promise<void>;
+  updatePipelineConfig: (newConfig: PipelineConfig) => void;
+  migrateDataForColumnChanges: (oldConfig: PipelineConfig, newConfig: PipelineConfig) => string[];
+  recentlyChangedSteps: string[];
+  clearRecentlyChangedSteps: () => void;
 }
 
 // Deployment payload structure
@@ -184,6 +188,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     createInitialState
   );
   const [isHydrated, setIsHydrated] = useState(false);
+  const [recentlyChangedSteps, setRecentlyChangedSteps] = useState<string[]>([]);
 
   const stepsByCategory = useMemo(() => getStepsByCategory(pipelineConfig), [pipelineConfig]);
 
@@ -217,6 +222,78 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     const config = await loadPipelineConfig();
     setPipelineConfig(config);
   }, [loadPipelineConfig]);
+
+  // Update pipeline config directly (for local changes without DB)
+  const updatePipelineConfig = useCallback((newConfig: PipelineConfig) => {
+    setPipelineConfig(newConfig);
+  }, []);
+
+  // Migrate data when column names change
+  const migrateDataForColumnChanges = useCallback((oldConfig: PipelineConfig, newConfig: PipelineConfig): string[] => {
+    const changedStepNames: string[] = [];
+    const changedStepIds: string[] = [];
+
+    for (const newStep of newConfig.steps) {
+      const oldStep = oldConfig.steps.find(s => s.id === newStep.id);
+      if (!oldStep) continue;
+
+      const entries = state[newStep.id] || [];
+      if (entries.length === 0) continue;
+
+      // Get column names from old and new
+      const oldColNames = new Set(oldStep.columns.map(c => c.name));
+      const newColNames = new Set(newStep.columns.map(c => c.name));
+
+      // Find columns that were removed (might be renamed)
+      const removedCols = [...oldColNames].filter(n => !newColNames.has(n));
+      const addedCols = [...newColNames].filter(n => !oldColNames.has(n));
+
+      // If we have equal numbers of removed and added columns, they might be renames
+      // Match by position in the column array
+      if (removedCols.length > 0 && removedCols.length === addedCols.length) {
+        const renames: { oldName: string; newName: string }[] = [];
+
+        for (const oldColName of removedCols) {
+          const oldColIndex = oldStep.columns.findIndex(c => c.name === oldColName);
+          const newCol = newStep.columns[oldColIndex];
+
+          if (newCol && addedCols.includes(newCol.name)) {
+            renames.push({ oldName: oldColName, newName: newCol.name });
+          }
+        }
+
+        if (renames.length > 0) {
+          // Apply renames to entries
+          const updatedEntries = entries.map(entry => {
+            const newEntry = { ...entry };
+            for (const rename of renames) {
+              if (rename.oldName in entry) {
+                newEntry[rename.newName] = entry[rename.oldName];
+                delete newEntry[rename.oldName];
+              }
+            }
+            return newEntry;
+          });
+
+          dispatch({ type: 'SET_ENTRIES', stepId: newStep.id, entries: updatedEntries });
+          changedStepNames.push(newStep.name);
+          changedStepIds.push(newStep.id);
+        }
+      }
+    }
+
+    // Update recently changed steps for UI highlighting
+    if (changedStepIds.length > 0) {
+      setRecentlyChangedSteps(changedStepIds);
+    }
+
+    return changedStepNames;
+  }, [state]);
+
+  // Clear the recently changed steps highlight
+  const clearRecentlyChangedSteps = useCallback(() => {
+    setRecentlyChangedSteps([]);
+  }, []);
 
   // Load pipeline config and data from localStorage on mount
   useEffect(() => {
@@ -385,7 +462,11 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     convertToDeploymentPayload,
     isHydrated,
     refreshPipelineConfig,
-  }), [state, pipelineConfig, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, importData, exportData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload, isHydrated, refreshPipelineConfig]);
+    updatePipelineConfig,
+    migrateDataForColumnChanges,
+    recentlyChangedSteps,
+    clearRecentlyChangedSteps,
+  }), [state, pipelineConfig, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, importData, exportData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload, isHydrated, refreshPipelineConfig, updatePipelineConfig, migrateDataForColumnChanges, recentlyChangedSteps, clearRecentlyChangedSteps]);
 
   return (
     <ConfigDataContext.Provider value={value}>

@@ -6,15 +6,22 @@ import { Card, CardHeader, CardTitle, CardContent, Button, Alert } from '@/compo
 import { PipelineEditor } from '@/components/pipeline';
 import { DEFAULT_PIPELINE_CONFIG, validatePipelineConfig } from '@/lib/pipeline/config';
 import { downloadAllTemplates, downloadCSV, generateCSVTemplates } from '@/lib/csv/generator';
+import { useConfigData } from '@/contexts/ConfigDataContext';
 import type { PipelineConfig } from '@/types';
+
+type TabType = 'editor' | 'summary';
 
 export default function PipelinePage() {
   const supabase = createClient();
+  const { pipelineConfig: contextConfig, updatePipelineConfig, migrateDataForColumnChanges, refreshPipelineConfig } = useConfigData();
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_PIPELINE_CONFIG);
+  const [previousConfig, setPreviousConfig] = useState<PipelineConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('editor');
+  const [changedSteps, setChangedSteps] = useState<string[]>([]);
 
   // Load saved config from Supabase
   useEffect(() => {
@@ -101,8 +108,22 @@ export default function PipelinePage() {
         if (error) throw error;
       }
 
+      // Migrate data for column changes (if any columns were renamed)
+      const migrated = migrateDataForColumnChanges(config, newConfig);
+      if (migrated.length > 0) {
+        setChangedSteps(migrated);
+        setMessage({
+          type: 'success',
+          text: `Pipeline configuration saved. Data migrated for: ${migrated.join(', ')}`,
+        });
+      } else {
+        setMessage({ type: 'success', text: 'Pipeline configuration saved successfully' });
+      }
+
+      // Update context and local state
+      setPreviousConfig(config);
       setConfig(newConfig);
-      setMessage({ type: 'success', text: 'Pipeline configuration saved successfully' });
+      updatePipelineConfig(newConfig);
     } catch (error) {
       console.error('Error saving config:', error);
       setMessage({
@@ -112,7 +133,7 @@ export default function PipelinePage() {
     } finally {
       setSaving(false);
     }
-  }, [supabase]);
+  }, [supabase, config, migrateDataForColumnChanges, updatePipelineConfig]);
 
   const handleGenerateCSV = useCallback((currentConfig: PipelineConfig) => {
     setShowDownloadOptions(true);
@@ -140,6 +161,29 @@ export default function PipelinePage() {
       setMessage({ type: 'warning', text: 'Configuration reset to default. Click "Save Configuration" to persist.' });
     }
   };
+
+  const handleMoveStep = useCallback((index: number, direction: 'up' | 'down') => {
+    const newSteps = [...config.steps];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (newIndex < 0 || newIndex >= newSteps.length) return;
+
+    // Swap the steps
+    [newSteps[index], newSteps[newIndex]] = [newSteps[newIndex], newSteps[index]];
+
+    // Update order numbers
+    newSteps.forEach((step, i) => {
+      step.order = i + 1;
+    });
+
+    const newConfig = { ...config, steps: newSteps };
+    setConfig(newConfig);
+    setMessage({ type: 'warning', text: 'Step order changed. Click "Save" to persist changes.' });
+  }, [config]);
+
+  const handleSaveReorder = useCallback(async () => {
+    await handleSave(config);
+  }, [config, handleSave]);
 
   if (loading) {
     return (
@@ -176,59 +220,113 @@ export default function PipelinePage() {
         </Alert>
       )}
 
-      {/* Instructions Card */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('editor')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'editor'
+                ? 'border-black text-black'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
               </svg>
+              Deployment Pipeline
             </div>
-            <div>
-              <h3 className="font-medium text-gray-900">Visual Pipeline Editor</h3>
-              <p className="text-sm text-gray-600 mt-1">
-                Use the visual editor below to configure your deployment pipeline. Drag nodes to reposition them,
-                connect nodes to define dependencies, and click on a node to edit its properties including
-                Salesforce API names, columns, and ID mappings.
-              </p>
+          </button>
+          <button
+            onClick={() => setActiveTab('summary')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'summary'
+                ? 'border-black text-black'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Configuration Summary
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </button>
+        </nav>
+      </div>
 
-      {/* Pipeline Editor */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <div className="flex items-center justify-between">
-              <span>Deployment Pipeline</span>
-              <span className="text-sm font-normal text-gray-500">
-                {config.steps.length} objects configured
-              </span>
-            </div>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <PipelineEditor
-            initialConfig={config}
-            onSave={handleSave}
-            onGenerateCSV={handleGenerateCSV}
-          />
-        </CardContent>
-      </Card>
+      {/* Deployment Pipeline Tab */}
+      {activeTab === 'editor' && (
+        <>
+          {/* Instructions Card */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">Visual Pipeline Editor</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Use the visual editor below to configure your deployment pipeline. Drag nodes to reposition them,
+                    connect nodes to define dependencies, and click on a node to edit its properties including
+                    Salesforce API names, columns, and ID mappings.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Configuration Summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Configuration Summary</CardTitle>
-        </CardHeader>
-        <CardContent>
+          {/* Pipeline Editor */}
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <div className="flex items-center justify-between">
+                  <span>Deployment Pipeline</span>
+                  <span className="text-sm font-normal text-gray-500">
+                    {config.steps.length} objects configured
+                  </span>
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <PipelineEditor
+                initialConfig={config}
+                onSave={handleSave}
+                onGenerateCSV={handleGenerateCSV}
+              />
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* Configuration Summary Tab */}
+      {activeTab === 'summary' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <div className="flex items-center justify-between">
+                <span>Configuration Summary</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-normal text-gray-500">
+                    {config.steps.length} objects configured
+                  </span>
+                  <Button size="sm" onClick={handleSaveReorder}>
+                    Save Order
+                  </Button>
+                </div>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="py-2 px-3 text-left text-gray-500 font-medium">Order</th>
+                  <th className="py-2 px-3 text-left text-gray-500 font-medium w-20">Order</th>
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">Object</th>
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">API Endpoint</th>
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">Method</th>
@@ -239,11 +337,40 @@ export default function PipelinePage() {
               </thead>
               <tbody>
                 {config.steps.map((step, index) => (
-                  <tr key={step.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <tr
+                    key={step.id}
+                    className={`border-b border-gray-100 hover:bg-gray-50 ${
+                      changedSteps.includes(step.name) ? 'bg-yellow-50' : ''
+                    }`}
+                  >
                     <td className="py-2 px-3">
-                      <span className="w-6 h-6 inline-flex items-center justify-center bg-black text-white text-xs font-medium rounded-full">
-                        {index + 1}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="w-6 h-6 inline-flex items-center justify-center bg-black text-white text-xs font-medium rounded-full">
+                          {index + 1}
+                        </span>
+                        <div className="flex flex-col">
+                          <button
+                            onClick={() => handleMoveStep(index, 'up')}
+                            disabled={index === 0}
+                            className={`p-0.5 rounded hover:bg-gray-200 ${index === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600'}`}
+                            title="Move up"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleMoveStep(index, 'down')}
+                            disabled={index === config.steps.length - 1}
+                            className={`p-0.5 rounded hover:bg-gray-200 ${index === config.steps.length - 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600'}`}
+                            title="Move down"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
                     </td>
                     <td className="py-2 px-3 font-medium text-gray-900">{step.name}</td>
                     <td className="py-2 px-3">
@@ -291,6 +418,7 @@ export default function PipelinePage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Download Options Modal */}
       {showDownloadOptions && (

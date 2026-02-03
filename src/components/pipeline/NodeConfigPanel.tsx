@@ -23,6 +23,8 @@ export function NodeConfigPanel({
   const [label, setLabel] = useState(node.data.label as string);
   const [apiName, setApiName] = useState(node.data.apiName as string);
   const [worksheetName, setWorksheetName] = useState(node.data.worksheetName as string);
+  const [endpoint, setEndpoint] = useState(node.data.endpoint as string || '');
+  const [method, setMethod] = useState(node.data.method as string || 'POST');
   const [columns, setColumns] = useState<PipelineStep['columns']>(
     (node.data.columns as PipelineStep['columns']) || []
   );
@@ -35,15 +37,26 @@ export function NodeConfigPanel({
     setLabel(node.data.label as string);
     setApiName(node.data.apiName as string);
     setWorksheetName(node.data.worksheetName as string);
+    setEndpoint(node.data.endpoint as string || '');
+    setMethod(node.data.method as string || 'POST');
     setColumns((node.data.columns as PipelineStep['columns']) || []);
     setParentIdMappings((node.data.parentIdMappings as PipelineStep['parentIdMappings']) || []);
   }, [node]);
+
+  // Auto-generate endpoint when apiName changes
+  useEffect(() => {
+    if (apiName && !endpoint) {
+      setEndpoint(`/services/data/v60.0/sobjects/${apiName}/`);
+    }
+  }, [apiName, endpoint]);
 
   const handleSave = () => {
     onUpdate(node.id, {
       label,
       apiName,
       worksheetName,
+      endpoint: endpoint || `/services/data/v60.0/sobjects/${apiName}/`,
+      method,
       columns,
       parentIdMappings,
     });
@@ -68,7 +81,7 @@ export function NodeConfigPanel({
   const addMapping = () => {
     setParentIdMappings([
       ...parentIdMappings,
-      { field: '', parentStep: '', parentField: 'Id' },
+      { field: '', parentStep: '', parentField: 'Name', parentIdField: 'id' },
     ]);
   };
 
@@ -139,6 +152,42 @@ export function NodeConfigPanel({
           </div>
         </section>
 
+        {/* API Configuration */}
+        <section>
+          <h4 className="text-sm font-medium text-gray-700 mb-3">API Configuration</h4>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                API Endpoint
+              </label>
+              <input
+                type="text"
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                placeholder={`/services/data/v60.0/sobjects/${apiName || 'ObjectName'}/`}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-black font-mono text-xs"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Leave empty to use default: /services/data/v60.0/sobjects/{'{API Name}'}/
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                HTTP Method
+              </label>
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-black"
+              >
+                <option value="POST">POST (Create)</option>
+                <option value="PATCH">PATCH (Update)</option>
+                <option value="PUT">PUT (Upsert)</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
         {/* Columns */}
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -170,6 +219,7 @@ export function NodeConfigPanel({
                   <option value="boolean">Boolean</option>
                   <option value="date">Date</option>
                   <option value="currency">Currency</option>
+                  <option value="picklist">Picklist</option>
                   <option value="reference">Reference</option>
                 </select>
                 <label className="flex items-center gap-1 text-xs whitespace-nowrap">
@@ -212,6 +262,7 @@ export function NodeConfigPanel({
           </div>
           <p className="text-xs text-gray-500 mb-3">
             Define how fields in this object reference IDs from parent objects.
+            Adding a mapping will create a dependency arrow automatically.
           </p>
           <div className="space-y-3">
             {parentIdMappings.map((mapping, index) => (
@@ -251,7 +302,7 @@ export function NodeConfigPanel({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">References</label>
+                    <label className="block text-xs text-gray-500 mb-1">References Object</label>
                     <select
                       value={mapping.parentStep}
                       onChange={(e) => updateMapping(index, 'parentStep', e.target.value)}
@@ -267,14 +318,17 @@ export function NodeConfigPanel({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Match By Field</label>
+                  <label className="block text-xs text-gray-500 mb-1">Match By Field (lookup key)</label>
                   <input
                     type="text"
                     value={mapping.parentField}
                     onChange={(e) => updateMapping(index, 'parentField', e.target.value)}
                     className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
-                    placeholder="e.g., Id or External_Id__c"
+                    placeholder="e.g., Name or Code"
                   />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Field used to look up the parent record (usually Name or Code)
+                  </p>
                 </div>
               </div>
             ))}

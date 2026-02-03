@@ -27,6 +27,7 @@ interface PipelineEditorProps {
   initialConfig: PipelineConfig;
   onSave: (config: PipelineConfig) => void;
   onGenerateCSV: (config: PipelineConfig) => void;
+  onConfigChange?: (config: PipelineConfig) => void;
 }
 
 const nodeTypes = {
@@ -63,6 +64,8 @@ function configToFlow(config: PipelineConfig): { nodes: Node[]; edges: Edge[] } 
         order: step.order,
         columns: step.columns,
         parentIdMappings: step.parentIdMappings,
+        endpoint: step.endpoint,
+        method: step.method,
       },
     });
 
@@ -94,15 +97,23 @@ function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConf
       .filter((edge) => edge.target === node.id)
       .map((edge) => edge.source);
 
+    const apiName = node.data.apiName as string;
+    const methodValue = node.data.method as string;
+    const method = (methodValue === 'POST' || methodValue === 'PATCH' || methodValue === 'PUT')
+      ? methodValue
+      : 'POST';
+
     return {
       id: node.id,
       name: node.data.label as string,
-      apiName: node.data.apiName as string,
+      apiName,
       worksheetName: node.data.worksheetName as string,
       order: index + 1,
       dependsOn,
       columns: (node.data.columns as PipelineStep['columns']) || [],
       parentIdMappings: (node.data.parentIdMappings as PipelineStep['parentIdMappings']) || [],
+      endpoint: (node.data.endpoint as string) || `/services/data/v60.0/sobjects/${apiName}/`,
+      method,
     };
   });
 
@@ -112,7 +123,7 @@ function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConf
   };
 }
 
-export function PipelineEditor({ initialConfig, onSave, onGenerateCSV }: PipelineEditorProps) {
+export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigChange }: PipelineEditorProps) {
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
     () => configToFlow(initialConfig),
     [initialConfig]
@@ -166,9 +177,43 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV }: Pipelin
           return node;
         })
       );
+
+      // Auto-create edges from parentIdMappings
+      const parentIdMappings = data.parentIdMappings as PipelineStep['parentIdMappings'];
+      if (parentIdMappings && parentIdMappings.length > 0) {
+        setEdges((eds) => {
+          let newEdges = [...eds];
+
+          for (const mapping of parentIdMappings) {
+            if (mapping.parentStep) {
+              const edgeId = `${mapping.parentStep}-${nodeId}`;
+              const edgeExists = newEdges.some((e) => e.id === edgeId);
+
+              if (!edgeExists) {
+                newEdges.push({
+                  id: edgeId,
+                  source: mapping.parentStep,
+                  target: nodeId,
+                  type: 'smoothstep',
+                  animated: true,
+                  markerEnd: {
+                    type: MarkerType.ArrowClosed,
+                    width: 20,
+                    height: 20,
+                  },
+                  style: { stroke: '#000', strokeWidth: 2 },
+                });
+              }
+            }
+          }
+
+          return newEdges;
+        });
+      }
+
       setSelectedNode(null);
     },
-    [setNodes]
+    [setNodes, setEdges]
   );
 
   const handleNodeDelete = useCallback(
@@ -221,6 +266,20 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV }: Pipelin
     onGenerateCSV(config);
   }, [nodes, edges, initialConfig, onGenerateCSV]);
 
+  const handleExportConfig = useCallback(() => {
+    const config = flowToConfig(nodes, edges, initialConfig);
+    const jsonString = JSON.stringify(config, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `pipeline-config-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [nodes, edges, initialConfig]);
+
   return (
     <div className="h-[700px] w-full border border-gray-200 rounded-lg overflow-hidden bg-white">
       <ReactFlow
@@ -257,17 +316,23 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV }: Pipelin
         </Panel>
 
         <Panel position="top-right" className="flex items-center gap-2">
+          <Button onClick={handleExportConfig} variant="outline" size="sm">
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Export JSON
+          </Button>
           <Button onClick={handleGenerateCSV} variant="outline" size="sm">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            Generate CSV Template
+            Generate CSV
           </Button>
           <Button onClick={handleSave} size="sm">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
             </svg>
-            Save Configuration
+            Save
           </Button>
         </Panel>
 
