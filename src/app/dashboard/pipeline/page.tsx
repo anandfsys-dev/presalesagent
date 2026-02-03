@@ -21,18 +21,22 @@ export default function PipelinePage() {
     const loadConfig = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) {
+          setLoading(false);
+          return;
+        }
 
+        // Try to find default config first, then most recent
         const { data } = await supabase
           .from('pipeline_configs')
           .select('*')
           .eq('user_id', user.id)
+          .order('is_default', { ascending: false })
           .order('updated_at', { ascending: false })
-          .limit(1)
-          .single();
+          .limit(1);
 
-        if (data?.config) {
-          setConfig(data.config as PipelineConfig);
+        if (data && data.length > 0 && data[0].config) {
+          setConfig(data[0].config as PipelineConfig);
         }
       } catch (error) {
         // No saved config, use default
@@ -63,18 +67,39 @@ export default function PipelinePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Upsert config
-      const { error } = await supabase
+      // Check if config already exists for this user
+      const { data: existingConfig } = await supabase
         .from('pipeline_configs')
-        .upsert({
-          user_id: user.id,
-          config: newConfig,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id',
-        });
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_default', true)
+        .single();
 
-      if (error) throw error;
+      if (existingConfig) {
+        // Update existing config
+        const { error } = await supabase
+          .from('pipeline_configs')
+          .update({
+            config: newConfig,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingConfig.id);
+
+        if (error) throw error;
+      } else {
+        // Insert new config
+        const { error } = await supabase
+          .from('pipeline_configs')
+          .insert({
+            user_id: user.id,
+            name: newConfig.name || 'Default Pipeline',
+            description: 'Salesforce Revenue Cloud deployment pipeline',
+            config: newConfig,
+            is_default: true,
+          });
+
+        if (error) throw error;
+      }
 
       setConfig(newConfig);
       setMessage({ type: 'success', text: 'Pipeline configuration saved successfully' });
