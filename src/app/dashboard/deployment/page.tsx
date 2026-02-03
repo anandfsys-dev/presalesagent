@@ -14,13 +14,8 @@ import {
   ProgressBar,
   Select,
 } from '@/components/ui';
-import type { WorksheetData, SalesforceConnection } from '@/types';
-
-interface DeploymentData {
-  connectionId: string;
-  fileName: string;
-  worksheets: WorksheetData[];
-}
+import { useConfigData, DeploymentPayload } from '@/contexts/ConfigDataContext';
+import type { SalesforceConnection } from '@/types';
 
 interface DeploymentProgress {
   currentStep: string;
@@ -35,8 +30,19 @@ interface DeploymentProgress {
 
 interface DeploymentLog {
   timestamp: string;
-  level: 'info' | 'warning' | 'error' | 'debug';
+  level: 'info' | 'warning' | 'error' | 'success';
   message: string;
+  salesforceId?: string;
+  objectType?: string;
+}
+
+interface CreatedRecord {
+  stepId: string;
+  stepName: string;
+  objectType: string;
+  name: string;
+  salesforceId: string;
+  timestamp: string;
 }
 
 type DeploymentMode = 'full' | 'incremental' | 'validation_only';
@@ -44,14 +50,17 @@ type DeploymentMode = 'full' | 'incremental' | 'validation_only';
 export default function DeploymentPage() {
   const router = useRouter();
   const supabase = createClient();
+  const { state, pipelineConfig, getTotalEntryCount, convertToDeploymentPayload, stepsByCategory } = useConfigData();
 
-  const [deploymentData, setDeploymentData] = useState<DeploymentData | null>(null);
+  const [connections, setConnections] = useState<SalesforceConnection[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string>('');
   const [connection, setConnection] = useState<SalesforceConnection | null>(null);
   const [deploymentMode, setDeploymentMode] = useState<DeploymentMode>('full');
   const [isDeploying, setIsDeploying] = useState(false);
   const [deploymentComplete, setDeploymentComplete] = useState(false);
   const [progress, setProgress] = useState<DeploymentProgress | null>(null);
   const [logs, setLogs] = useState<DeploymentLog[]>([]);
+  const [createdRecords, setCreatedRecords] = useState<CreatedRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     success: boolean;
@@ -61,61 +70,76 @@ export default function DeploymentPage() {
     skippedCount: number;
   } | null>(null);
 
-  // Load deployment data from session storage
+  // Load connections
   useEffect(() => {
-    const storedData = sessionStorage.getItem('deploymentData');
-    if (storedData) {
-      const data: DeploymentData = JSON.parse(storedData);
-      setDeploymentData(data);
+    const fetchConnections = async () => {
+      const { data: conns } = await supabase
+        .from('connections')
+        .select('*')
+        .eq('status', 'active')
+        .order('name');
 
-      // Fetch connection details
-      const fetchConnection = async () => {
-        const { data: conn } = await supabase
-          .from('connections')
-          .select('*')
-          .eq('id', data.connectionId)
-          .single();
-
-        if (conn) {
-          setConnection(conn);
+      if (conns) {
+        setConnections(conns);
+        if (conns.length > 0 && !selectedConnectionId) {
+          setSelectedConnectionId(conns[0].id);
+          setConnection(conns[0]);
         }
-      };
+      }
+    };
 
-      fetchConnection();
+    fetchConnections();
+  }, [supabase, selectedConnectionId]);
+
+  // Update connection when selection changes
+  useEffect(() => {
+    if (selectedConnectionId) {
+      const conn = connections.find(c => c.id === selectedConnectionId);
+      setConnection(conn || null);
     }
-  }, [supabase]);
+  }, [selectedConnectionId, connections]);
 
-  const addLog = useCallback((level: DeploymentLog['level'], message: string) => {
+  const addLog = useCallback((level: DeploymentLog['level'], message: string, salesforceId?: string, objectType?: string) => {
     setLogs((prev) => [
       ...prev,
       {
         timestamp: new Date().toISOString(),
         level,
         message,
+        salesforceId,
+        objectType,
       },
     ]);
   }, []);
 
   const handleStartDeployment = async () => {
-    if (!deploymentData || !connection) return;
+    if (!connection) return;
+
+    const totalEntries = getTotalEntryCount();
+    if (totalEntries === 0) {
+      setError('No data to deploy. Please add data in the Data Entry page first.');
+      return;
+    }
 
     setIsDeploying(true);
     setDeploymentComplete(false);
     setError(null);
     setLogs([]);
+    setCreatedRecords([]);
     setResult(null);
 
+    const payload = convertToDeploymentPayload();
+
     addLog('info', `Starting ${deploymentMode} deployment to ${connection.name}`);
-    addLog('info', `Processing file: ${deploymentData.fileName}`);
+    addLog('info', `Processing ${payload.metadata.totalEntries} entries across ${payload.metadata.stepCount} steps`);
 
     try {
-      const response = await fetch('/api/deployment/execute', {
+      const response = await fetch('/api/deployment/execute-pipeline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          connectionId: deploymentData.connectionId,
-          fileName: deploymentData.fileName,
-          worksheets: deploymentData.worksheets,
+          connectionId: connection.id,
+          payload,
           mode: deploymentMode,
         }),
       });
@@ -141,12 +165,16 @@ export default function DeploymentPage() {
             if (event.type === 'progress') {
               setProgress(event.data);
             } else if (event.type === 'log') {
-              addLog(event.data.level, event.data.message);
+              addLog(event.data.level, event.data.message, event.data.salesforceId, event.data.objectType);
+            } else if (event.type === 'record_created') {
+              setCreatedRecords(prev => [...prev, event.data]);
+              addLog('success', `Created ${event.data.objectType}: ${event.data.name}`, event.data.salesforceId, event.data.objectType);
             } else if (event.type === 'complete') {
               setResult(event.data);
               setDeploymentComplete(true);
             } else if (event.type === 'error') {
               setError(event.data.message);
+              addLog('error', event.data.message);
             }
           } catch {
             // Ignore parse errors for incomplete chunks
@@ -163,39 +191,59 @@ export default function DeploymentPage() {
   };
 
   const handleCancel = () => {
-    // In a real implementation, this would abort the fetch request
     setIsDeploying(false);
     addLog('warning', 'Deployment cancelled by user');
   };
 
-  const getTotalRecords = () => {
-    if (!deploymentData) return 0;
-    return deploymentData.worksheets.reduce((sum, ws) => sum + ws.rowCount, 0);
+  // Get entry count by category
+  const getEntriesByCategory = () => {
+    const categories: Record<string, { count: number; steps: { name: string; count: number }[] }> = {};
+
+    for (const [category, steps] of Object.entries(stepsByCategory)) {
+      const stepsWithData = steps
+        .map(step => ({
+          name: step.name,
+          count: (state[step.id] || []).length
+        }))
+        .filter(s => s.count > 0);
+
+      if (stepsWithData.length > 0) {
+        categories[category] = {
+          count: stepsWithData.reduce((sum, s) => sum + s.count, 0),
+          steps: stepsWithData
+        };
+      }
+    }
+
+    return categories;
   };
 
-  if (!deploymentData) {
+  const totalEntries = getTotalEntryCount();
+  const entriesByCategory = getEntriesByCategory();
+
+  if (totalEntries === 0) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Deployment</h1>
-          <p className="text-gray-600 mt-1">No deployment data available</p>
+          <p className="text-gray-600 mt-1">No data available for deployment</p>
         </div>
 
         <Card className="border-2 border-dashed border-gray-300 bg-gray-50">
           <CardContent className="text-center py-12">
             <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              No Template Uploaded
+              No Configuration Data
             </h3>
             <p className="text-gray-600 mb-6">
-              Upload an Excel template first to start a deployment.
+              Add data in the Data Entry page before deploying to Salesforce.
             </p>
-            <Button onClick={() => router.push('/dashboard/upload')}>
-              Go to Upload
+            <Button onClick={() => router.push('/dashboard/data-entry')}>
+              Go to Data Entry
             </Button>
           </CardContent>
         </Card>
@@ -209,11 +257,11 @@ export default function DeploymentPage() {
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Deployment</h1>
         <p className="text-gray-600 mt-1">
-          Deploy configuration to Salesforce
+          Deploy configuration to Salesforce Revenue Cloud
         </p>
       </div>
 
-      {/* Deployment Info */}
+      {/* Deployment Configuration */}
       <Card>
         <CardHeader>
           <CardTitle>Deployment Configuration</CardTitle>
@@ -221,21 +269,21 @@ export default function DeploymentPage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-500 mb-1">
-                Template File
-              </label>
-              <p className="text-gray-900 font-medium">{deploymentData.fileName}</p>
-              <p className="text-sm text-gray-500">
-                {getTotalRecords()} total records across {deploymentData.worksheets.length} worksheets
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-500 mb-1">
-                Target Connection
-              </label>
-              <p className="text-gray-900 font-medium">{connection?.name || 'Loading...'}</p>
-              <p className="text-sm text-gray-500">{connection?.instance_url}</p>
+              <Select
+                label="Target Connection"
+                value={selectedConnectionId}
+                onChange={(e) => setSelectedConnectionId(e.target.value)}
+                options={connections.map(c => ({
+                  value: c.id,
+                  label: `${c.name} (${c.instance_url})`
+                }))}
+                disabled={isDeploying || connections.length === 0}
+              />
+              {connections.length === 0 && (
+                <p className="text-sm text-red-500 mt-1">
+                  No active connections. <a href="/dashboard/connections" className="underline">Add a connection</a>
+                </p>
+              )}
             </div>
 
             <div>
@@ -252,9 +300,12 @@ export default function DeploymentPage() {
               />
             </div>
 
-            <div className="flex items-end">
+            <div className="md:col-span-2 flex items-end gap-4">
               {!isDeploying && !deploymentComplete && (
-                <Button onClick={handleStartDeployment} className="w-full md:w-auto">
+                <Button
+                  onClick={handleStartDeployment}
+                  disabled={!connection}
+                >
                   Start Deployment
                 </Button>
               )}
@@ -268,12 +319,48 @@ export default function DeploymentPage() {
                   <Button variant="outline" onClick={() => router.push('/dashboard/history')}>
                     View History
                   </Button>
-                  <Button onClick={() => router.push('/dashboard/upload')}>
-                    New Deployment
+                  <Button variant="outline" onClick={() => {
+                    setDeploymentComplete(false);
+                    setResult(null);
+                    setProgress(null);
+                    setLogs([]);
+                    setCreatedRecords([]);
+                  }}>
+                    Reset
+                  </Button>
+                  <Button onClick={() => router.push('/dashboard/data-entry')}>
+                    Edit Data
                   </Button>
                 </div>
               )}
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Data Summary */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Data Summary - {totalEntries} Total Entries</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Object.entries(entriesByCategory).map(([category, data]) => (
+              <div key={category} className="border rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-medium text-gray-900">{category}</h4>
+                  <Badge variant="default">{data.count}</Badge>
+                </div>
+                <ul className="space-y-1">
+                  {data.steps.map(step => (
+                    <li key={step.name} className="text-sm text-gray-600 flex justify-between">
+                      <span>{step.name}</span>
+                      <span className="text-gray-400">{step.count}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -348,7 +435,7 @@ export default function DeploymentPage() {
           <CardContent>
             {result.success ? (
               <Alert variant="success" title="Deployment Successful">
-                All {result.successCount} objects were created successfully.
+                All {result.successCount} objects were created successfully in Salesforce.
               </Alert>
             ) : (
               <Alert variant="warning" title="Deployment Completed with Issues">
@@ -367,7 +454,42 @@ export default function DeploymentPage() {
         </Alert>
       )}
 
-      {/* Logs */}
+      {/* Created Records Log */}
+      {createdRecords.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Created Records ({createdRecords.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto max-h-80 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="border-b border-gray-200">
+                    <th className="py-2 px-3 text-left font-medium text-gray-500">Step</th>
+                    <th className="py-2 px-3 text-left font-medium text-gray-500">Object Type</th>
+                    <th className="py-2 px-3 text-left font-medium text-gray-500">Name</th>
+                    <th className="py-2 px-3 text-left font-medium text-gray-500">Salesforce ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {createdRecords.map((record, idx) => (
+                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-2 px-3 text-gray-600">{record.stepName}</td>
+                      <td className="py-2 px-3">
+                        <Badge variant="default">{record.objectType}</Badge>
+                      </td>
+                      <td className="py-2 px-3 font-medium text-gray-900">{record.name}</td>
+                      <td className="py-2 px-3 font-mono text-xs text-blue-600">{record.salesforceId}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Deployment Logs */}
       {logs.length > 0 && (
         <Card>
           <CardHeader>
@@ -386,52 +508,23 @@ export default function DeploymentPage() {
                         ? 'text-red-400'
                         : log.level === 'warning'
                         ? 'text-yellow-400'
-                        : log.level === 'info'
-                        ? 'text-blue-400'
-                        : 'text-gray-400'
+                        : log.level === 'success'
+                        ? 'text-green-400'
+                        : 'text-blue-400'
                     }`}
                   >
                     [{log.level.toUpperCase()}]
                   </span>
-                  <span className="text-gray-100">{log.message}</span>
+                  <span className="text-gray-100 flex-1">{log.message}</span>
+                  {log.salesforceId && (
+                    <span className="text-cyan-400 font-mono text-xs">{log.salesforceId}</span>
+                  )}
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
       )}
-
-      {/* Worksheets Summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Summary</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="py-3 px-4 text-left text-sm font-medium text-gray-500">Worksheet</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-gray-500">Records</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-gray-500">Columns</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deploymentData.worksheets.map((ws) => (
-                  <tr key={ws.name} className="border-b border-gray-100">
-                    <td className="py-3 px-4 text-sm font-medium text-gray-900">{ws.name}</td>
-                    <td className="py-3 px-4 text-sm text-gray-600">{ws.rowCount}</td>
-                    <td className="py-3 px-4 text-sm text-gray-600">
-                      {ws.columns.slice(0, 5).join(', ')}
-                      {ws.columns.length > 5 && ` +${ws.columns.length - 5} more`}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

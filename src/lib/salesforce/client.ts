@@ -112,6 +112,30 @@ export class SalesforceClient {
   }
 
   /**
+   * Create a record with enhanced error handling
+   */
+  async createRecord(objectType: string, data: Record<string, unknown>): Promise<{ success: boolean; id?: string; errors?: string[] }> {
+    try {
+      const result = await this.request<{ id: string; success: boolean; errors: Array<{ message: string }> }>(
+        `/services/data/v${this.apiVersion}/sobjects/${objectType}`,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }
+      );
+      return {
+        success: true,
+        id: result.id,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        errors: [error instanceof Error ? error.message : 'Unknown error'],
+      };
+    }
+  }
+
+  /**
    * Update a record
    */
   async update(objectType: string, id: string, data: Record<string, unknown>): Promise<void> {
