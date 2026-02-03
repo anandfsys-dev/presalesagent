@@ -230,8 +230,8 @@ export default function PipelinePage() {
                 <tr className="border-b border-gray-200">
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">Order</th>
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">Object</th>
-                  <th className="py-2 px-3 text-left text-gray-500 font-medium">API Name</th>
-                  <th className="py-2 px-3 text-left text-gray-500 font-medium">CSV File</th>
+                  <th className="py-2 px-3 text-left text-gray-500 font-medium">API Endpoint</th>
+                  <th className="py-2 px-3 text-left text-gray-500 font-medium">Method</th>
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">Columns</th>
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">Dependencies</th>
                   <th className="py-2 px-3 text-left text-gray-500 font-medium">Actions</th>
@@ -246,12 +246,24 @@ export default function PipelinePage() {
                       </span>
                     </td>
                     <td className="py-2 px-3 font-medium text-gray-900">{step.name}</td>
-                    <td className="py-2 px-3 font-mono text-xs text-gray-600">{step.apiName}</td>
-                    <td className="py-2 px-3 text-gray-600">{step.worksheetName}.csv</td>
+                    <td className="py-2 px-3">
+                      <code className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-700">
+                        {step.endpoint || `/services/data/v60.0/sobjects/${step.apiName}/`}
+                      </code>
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        step.method === 'PATCH' ? 'bg-yellow-100 text-yellow-800' :
+                        step.method === 'PUT' ? 'bg-blue-100 text-blue-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        {step.method || 'POST'}
+                      </span>
+                    </td>
                     <td className="py-2 px-3 text-gray-600">{step.columns.length}</td>
                     <td className="py-2 px-3">
                       {step.dependsOn.length > 0 ? (
-                        <span className="text-gray-600">
+                        <span className="text-gray-600 text-xs">
                           {step.dependsOn.map((depId) => {
                             const dep = config.steps.find((s) => s.id === depId);
                             return dep?.name || depId;
