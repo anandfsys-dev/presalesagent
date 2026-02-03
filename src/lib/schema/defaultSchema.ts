@@ -64,7 +64,7 @@ const attributeDefinitionObject: SchemaObject = {
   name: 'Attribute Definition',
   pluralName: 'Attribute Definitions',
   description: 'Product attribute definitions',
-  salesforceObject: 'ProductAttribute',
+  salesforceObject: 'AttributeDefinition',
   identifierField: 'DeveloperName',
   displayField: 'Name',
   deploymentOrder: 3,

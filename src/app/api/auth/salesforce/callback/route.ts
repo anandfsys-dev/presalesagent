@@ -5,11 +5,13 @@ import { NextResponse } from 'next/server';
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
 interface StateData {
+  connectionId?: string;
   name: string;
   instance_url: string;
   client_id: string;
   client_secret_encrypted: string;
   user_id: string;
+  isReauth?: boolean;
 }
 
 export async function GET(request: Request) {
@@ -82,6 +84,33 @@ export async function GET(request: Request) {
       orgType = 'sandbox';
     } else if (tokenData.instance_url?.includes('scratch') || tokenData.instance_url?.includes('develop')) {
       orgType = 'developer';
+    }
+
+    // Handle re-authentication: update by specific connection ID
+    if (stateData.isReauth && stateData.connectionId) {
+      const { error: updateError } = await supabase
+        .from('connections')
+        .update({
+          instance_url: tokenData.instance_url || stateData.instance_url,
+          org_id: orgId,
+          org_type: orgType,
+          access_token_encrypted: encryptToken(tokenData.access_token),
+          refresh_token_encrypted: tokenData.refresh_token ? encryptToken(tokenData.refresh_token) : null,
+          status: 'active',
+          last_connected: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', stateData.connectionId)
+        .eq('user_id', user.id);
+
+      if (updateError) {
+        console.error('Failed to re-authenticate connection:', updateError);
+        throw new Error('Failed to re-authenticate connection');
+      }
+
+      return NextResponse.redirect(
+        `${APP_URL}/dashboard/connections?success=Connection+re-authenticated+successfully`
+      );
     }
 
     // Check if connection with same org_id already exists for this user

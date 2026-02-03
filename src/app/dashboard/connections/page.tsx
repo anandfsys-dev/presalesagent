@@ -207,6 +207,39 @@ export default function ConnectionsPage() {
     checkConnectionStatus(connectionId);
   };
 
+  const handleReauthenticate = async (connectionId: string) => {
+    setFormLoading(true);
+    setStatusMessage(null);
+
+    try {
+      const response = await fetch('/api/salesforce/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to initiate re-authentication');
+      }
+
+      if (result.authUrl) {
+        window.location.href = result.authUrl;
+        return;
+      }
+
+      setStatusMessage({ type: 'success', message: 'Re-authentication initiated' });
+    } catch (error) {
+      setStatusMessage({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Re-authentication failed',
+      });
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active':
@@ -330,9 +363,22 @@ export default function ConnectionsPage() {
                       size="sm"
                       onClick={() => handleRefreshConnection(connection.id)}
                       disabled={checkingStatus.has(connection.id)}
+                      title="Test Connection"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleReauthenticate(connection.id)}
+                      disabled={formLoading}
+                      title="Re-authenticate"
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                       </svg>
                     </Button>
                     {!connection.is_default && (
@@ -352,6 +398,7 @@ export default function ConnectionsPage() {
                         setShowDeleteModal(true);
                       }}
                       className="text-red-600 border-red-200 hover:bg-red-50"
+                      title="Delete Connection"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
