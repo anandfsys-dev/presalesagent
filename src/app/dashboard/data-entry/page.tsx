@@ -15,13 +15,14 @@ import {
 } from '@/components/ui';
 import { ConfigDataProvider, useConfigData } from '@/contexts/ConfigDataContext';
 import { ObjectDataTable } from '@/components/data-entry';
+import { convertSeedDataToConfigFormat } from '@/lib/schema/seedData';
 import type { SalesforceConnection } from '@/types';
 
 // Wrapper component that uses the context
 function DataEntryContent() {
   const router = useRouter();
   const supabase = createClient();
-  const { state, pipelineConfig, getTotalEntryCount, convertToWorksheetData, clearAll } = useConfigData();
+  const { state, pipelineConfig, getTotalEntryCount, convertToWorksheetData, clearAll, loadData } = useConfigData();
 
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
   const [selectedConnection, setSelectedConnection] = useState<string>('');
@@ -95,6 +96,16 @@ function DataEntryContent() {
     if (confirm('Are you sure you want to clear all data? This cannot be undone.')) {
       clearAll();
     }
+  };
+
+  const handleLoadSampleData = () => {
+    if (totalEntries > 0) {
+      if (!confirm('This will replace all existing data with sample data. Continue?')) {
+        return;
+      }
+    }
+    const seedData = convertSeedDataToConfigFormat();
+    loadData(seedData);
   };
 
   const totalEntries = getTotalEntryCount();
@@ -211,6 +222,17 @@ function DataEntryContent() {
           </Button>
           <Button variant="outline" size="sm" onClick={collapseAll}>
             Collapse All
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLoadSampleData}
+            className="text-blue-600 border-blue-200 hover:bg-blue-50"
+          >
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Load Sample Data
           </Button>
         </div>
         <div className="flex gap-2">

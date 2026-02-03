@@ -1657,3 +1657,304 @@ export function getSeedDataInDeploymentOrder(): HierarchicalEntry[] {
     pricebook,
   ];
 }
+
+// ============================================
+// CONVERT SEED DATA TO CONFIG DATA STATE FORMAT
+// For use with the ConfigDataContext
+// ============================================
+export interface ConfigDataSeedFormat {
+  picklists: Array<{
+    _id: string;
+    Picklist_Name: string;
+    Picklist_API_Name: string;
+    Active: boolean;
+  }>;
+  picklist_values: Array<{
+    _id: string;
+    Picklist_Name: string;
+    Value_Label: string;
+    Value_API_Name: string;
+    Display_Order?: number;
+    Active: boolean;
+    Is_Default?: boolean;
+  }>;
+  categories: Array<{
+    _id: string;
+    Category_Name: string;
+    Category_Code: string;
+    Parent_Category_Code?: string;
+    Sequence?: number;
+    Active: boolean;
+    Description?: string;
+  }>;
+  attributes: Array<{
+    _id: string;
+    Attribute_Name: string;
+    Attribute_API_Name: string;
+    Data_Type: string;
+    Picklist_Name?: string;
+    Sequence?: number;
+    Required?: boolean;
+    Default_Value?: string;
+    Help_Text?: string;
+  }>;
+  products: Array<{
+    _id: string;
+    Product_Code: string;
+    Product_Name: string;
+    Product_Type: string;
+    Description?: string;
+    Product_Family?: string;
+    Active: boolean;
+    Category_Code?: string;
+  }>;
+  product_relationships: Array<{
+    _id: string;
+    Parent_Product_Code: string;
+    Child_Product_Code: string;
+    Relationship_Type: string;
+    Required?: boolean;
+    Min_Quantity?: number;
+    Max_Quantity?: number;
+    Default_Quantity?: number;
+  }>;
+  catalogs: Array<{
+    _id: string;
+    Catalog_Name: string;
+    Catalog_Code: string;
+    Active: boolean;
+    Description?: string;
+  }>;
+  catalog_products: Array<{
+    _id: string;
+    Catalog_Code: string;
+    Product_Code: string;
+    Sequence?: number;
+  }>;
+  pricebooks: Array<{
+    _id: string;
+    PriceBook_Name: string;
+    PriceBook_Code: string;
+    Currency: string;
+    Active: boolean;
+    Description?: string;
+  }>;
+  price_list_items: Array<{
+    _id: string;
+    PriceBook_Code: string;
+    Product_Code: string;
+    List_Price: number;
+  }>;
+  selling_models: Array<{
+    _id: string;
+    Selling_Model_Name: string;
+    Selling_Model_Code: string;
+    Selling_Term_Type: string;
+    Billing_Frequency?: string;
+    Product_Code: string;
+  }>;
+  attribute_mappings: Array<{
+    _id: string;
+    Product_Code: string;
+    Attribute_API_Name: string;
+    Required?: boolean;
+    Display_Order?: number;
+    Default_Value?: string;
+  }>;
+}
+
+export function convertSeedDataToConfigFormat(): ConfigDataSeedFormat {
+  const result: ConfigDataSeedFormat = {
+    picklists: [],
+    picklist_values: [],
+    categories: [],
+    attributes: [],
+    products: [],
+    product_relationships: [],
+    catalogs: [],
+    catalog_products: [],
+    pricebooks: [],
+    price_list_items: [],
+    selling_models: [],
+    attribute_mappings: [],
+  };
+
+  // Convert Attribute Picklists
+  for (const picklist of attributePicklists) {
+    result.picklists.push({
+      _id: picklist._id,
+      Picklist_Name: picklist.data.Name as string,
+      Picklist_API_Name: picklist.data.DeveloperName as string,
+      Active: picklist.data.IsActive as boolean,
+    });
+
+    // Convert picklist values
+    const values = picklist._childEntries?.attribute_picklist_value || [];
+    for (const value of values) {
+      result.picklist_values.push({
+        _id: value._id,
+        Picklist_Name: picklist.data.Name as string,
+        Value_Label: value.data.Label as string,
+        Value_API_Name: value.data.Value as string,
+        Display_Order: value.data.Sequence as number,
+        Active: true,
+        Is_Default: value.data.IsDefault as boolean,
+      });
+    }
+  }
+
+  // Convert Attribute Definitions
+  for (const attr of attributeDefinitions) {
+    // Find the picklist name if it references one
+    let picklistName: string | undefined;
+    if (attr.data.AttributePicklistId) {
+      const picklistEntry = attributePicklists.find(p => p._id === attr.data.AttributePicklistId);
+      if (picklistEntry) {
+        picklistName = picklistEntry.data.Name as string;
+      }
+    }
+
+    result.attributes.push({
+      _id: attr._id,
+      Attribute_Name: attr.data.Name as string,
+      Attribute_API_Name: attr.data.DeveloperName as string,
+      Data_Type: attr.data.DataType as string,
+      Picklist_Name: picklistName,
+      Required: attr.data.IsRequired as boolean,
+      Default_Value: attr.data.DefaultValue as string,
+      Help_Text: attr.data.Description as string,
+    });
+  }
+
+  // Convert Product Catalog
+  result.catalogs.push({
+    _id: productCatalog._id,
+    Catalog_Name: productCatalog.data.Name as string,
+    Catalog_Code: productCatalog.data.DeveloperName as string,
+    Active: productCatalog.data.IsActive as boolean,
+    Description: productCatalog.data.Description as string,
+  });
+
+  // Convert Product Categories
+  const categories = productCatalog._childEntries?.product_category || [];
+  for (const cat of categories) {
+    result.categories.push({
+      _id: cat._id,
+      Category_Name: cat.data.Name as string,
+      Category_Code: cat.data.DeveloperName as string,
+      Parent_Category_Code: cat.data.ParentCategoryId as string | undefined,
+      Sequence: cat.data.SortOrder as number,
+      Active: cat.data.IsActive as boolean,
+      Description: cat.data.Description as string,
+    });
+  }
+
+  // Convert all products (simple, configurable, bundles)
+  const allProducts = [...simpleProducts, ...configurableProducts, ...bundleProducts];
+  for (const prod of allProducts) {
+    result.products.push({
+      _id: prod._id,
+      Product_Code: prod.data.ProductCode as string,
+      Product_Name: prod.data.Name as string,
+      Product_Type: prod.data.Type as string || 'Base',
+      Description: prod.data.Description as string,
+      Product_Family: prod.data.Family as string,
+      Active: prod.data.IsActive as boolean,
+    });
+
+    // Convert product attribute mappings
+    const attrDefs = prod._childEntries?.product_attribute_definition || [];
+    for (const attrDef of attrDefs) {
+      // Find the attribute name
+      const attrEntry = attributeDefinitions.find(a => a._id === attrDef.data.ProductAttributeId);
+      if (attrEntry) {
+        result.attribute_mappings.push({
+          _id: attrDef._id,
+          Product_Code: prod.data.ProductCode as string,
+          Attribute_API_Name: attrEntry.data.DeveloperName as string,
+          Required: attrDef.data.IsRequired as boolean,
+          Display_Order: attrDef.data.Sequence as number,
+          Default_Value: attrDef.data.DefaultValue as string,
+        });
+      }
+    }
+
+    // Convert product relationships (bundle components)
+    const components = prod._childEntries?.product_related_component || [];
+    for (const comp of components) {
+      // Find child product code
+      const childProd = allProducts.find(p => p._id === comp.data.ChildProductId);
+      if (childProd) {
+        result.product_relationships.push({
+          _id: comp._id,
+          Parent_Product_Code: prod.data.ProductCode as string,
+          Child_Product_Code: childProd.data.ProductCode as string,
+          Relationship_Type: 'Bundle Component',
+          Required: comp.data.IsRequired as boolean,
+          Min_Quantity: comp.data.MinQuantity as number,
+          Max_Quantity: comp.data.MaxQuantity as number,
+          Default_Quantity: comp.data.Quantity as number,
+        });
+      }
+    }
+
+    // Convert selling model options
+    const smOptions = prod._childEntries?.product_selling_model_option || [];
+    for (const smOpt of smOptions) {
+      // Find the selling model
+      const smEntry = sellingModels.find(sm => sm._id === smOpt.data.ProductSellingModelId);
+      if (smEntry) {
+        result.selling_models.push({
+          _id: smOpt._id,
+          Selling_Model_Name: smEntry.data.Name as string,
+          Selling_Model_Code: smEntry.data.DeveloperName as string,
+          Selling_Term_Type: smEntry.data.SellingModelType as string,
+          Billing_Frequency: smEntry.data.PricingTermUnit as string,
+          Product_Code: prod.data.ProductCode as string,
+        });
+      }
+    }
+  }
+
+  // Convert product category assignments
+  for (const pcp of productCategoryAssignments) {
+    // Find the product and category codes
+    const prod = allProducts.find(p => p._id === pcp.data.ProductId);
+    const cat = categories.find(c => c._id === pcp.data.ProductCategoryId);
+    if (prod && cat) {
+      result.catalog_products.push({
+        _id: pcp._id,
+        Catalog_Code: productCatalog.data.DeveloperName as string,
+        Product_Code: prod.data.ProductCode as string,
+        Sequence: 0,
+      });
+    }
+  }
+
+  // Convert Pricebook
+  result.pricebooks.push({
+    _id: pricebook._id,
+    PriceBook_Name: pricebook.data.Name as string,
+    PriceBook_Code: 'STANDARD',
+    Currency: 'USD',
+    Active: pricebook.data.IsActive as boolean,
+    Description: pricebook.data.Description as string,
+  });
+
+  // Convert Pricebook Entries
+  const pbeEntries = pricebook._childEntries?.pricebook_entry || [];
+  for (const pbe of pbeEntries) {
+    // Find the product code
+    const prod = allProducts.find(p => p._id === pbe.data.Product2Id);
+    if (prod) {
+      result.price_list_items.push({
+        _id: pbe._id,
+        PriceBook_Code: 'STANDARD',
+        Product_Code: prod.data.ProductCode as string,
+        List_Price: pbe.data.UnitPrice as number,
+      });
+    }
+  }
+
+  return result;
+}
