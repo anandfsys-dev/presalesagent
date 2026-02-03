@@ -41,6 +41,8 @@ export interface PipelineStep {
   id: string;
   name: string;
   apiName: string; // Salesforce API name (e.g., Product2, Custom__c)
+  endpoint?: string; // Salesforce REST API endpoint
+  method?: 'POST' | 'PATCH' | 'PUT'; // HTTP method for deployment
   worksheetName: string; // CSV file name for this object
   order: number;
   dependsOn: string[]; // IDs of steps this depends on
@@ -50,17 +52,21 @@ export interface PipelineStep {
 
 export interface ColumnDefinition {
   name: string;
-  type: 'string' | 'number' | 'boolean' | 'date' | 'currency' | 'reference';
+  type: 'string' | 'number' | 'boolean' | 'date' | 'currency' | 'reference' | 'picklist';
   required: boolean;
   description?: string;
-  defaultValue?: string;
+  defaultValue?: string | number | boolean;
   referenceTo?: string; // For reference types, which object it references
+  referenceDisplayField?: string; // Field to display for reference selection
+  sfField?: string; // Salesforce API field name
+  picklistValues?: string[]; // For picklist types, allowed values
 }
 
 export interface ParentIdMapping {
   field: string; // Field in this object that holds the reference
   parentStep: string; // Step ID of the parent object
   parentField: string; // Field in parent to match against (e.g., 'Id', 'External_Id__c')
+  parentIdField?: string; // The ID field in parent (default: 'id')
 }
 
 export interface PipelineConfig {

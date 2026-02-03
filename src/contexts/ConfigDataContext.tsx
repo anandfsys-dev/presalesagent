@@ -1,189 +1,38 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
-import { DEFAULT_PIPELINE_CONFIG } from '@/lib/pipeline/config';
-import type { PipelineStep } from '@/types';
+import { DEFAULT_PIPELINE_CONFIG, getStepsByCategory } from '@/lib/pipeline/config';
+import type { PipelineStep, ColumnDefinition } from '@/types';
 
-// Types for each object's data
-export interface PicklistEntry {
+// Generic entry type that works with any step
+export interface DataEntry {
   _id: string;
-  Picklist_Name: string;
-  Picklist_API_Name: string;
-  Active: boolean;
+  _stepId: string;
+  [key: string]: unknown;
 }
 
-export interface PicklistValueEntry {
-  _id: string;
-  Picklist_Name: string;
-  Value_Label: string;
-  Value_API_Name: string;
-  Display_Order?: number;
-  Active: boolean;
-  Is_Default?: boolean;
-}
+// State type - dynamic based on pipeline steps
+export type ConfigDataState = {
+  [stepId: string]: DataEntry[];
+};
 
-export interface CategoryEntry {
-  _id: string;
-  Category_Name: string;
-  Category_Code: string;
-  Parent_Category_Code?: string;
-  Sequence?: number;
-  Active: boolean;
-  Description?: string;
-}
-
-export interface AttributeEntry {
-  _id: string;
-  Attribute_Name: string;
-  Attribute_API_Name: string;
-  Data_Type: string;
-  Display_Type?: string;
-  Picklist_Name?: string;
-  Sequence?: number;
-  Required?: boolean;
-  Default_Value?: string;
-  Help_Text?: string;
-  Min_Value?: number;
-  Max_Value?: number;
-  Max_Length?: number;
-}
-
-export interface ProductEntry {
-  _id: string;
-  Product_Code: string;
-  Product_Name: string;
-  Product_Type: string;
-  Description?: string;
-  Product_Family?: string;
-  Active: boolean;
-  Pricing_Method?: string;
-  Revenue_Recognition_Rule?: string;
-  Tax_Treatment?: string;
-  Parent_Product_Code?: string;
-  Category_Code?: string;
-}
-
-export interface ProductRelationshipEntry {
-  _id: string;
-  Parent_Product_Code: string;
-  Child_Product_Code: string;
-  Relationship_Type: string;
-  Required?: boolean;
-  Min_Quantity?: number;
-  Max_Quantity?: number;
-  Default_Quantity?: number;
-}
-
-export interface CatalogEntry {
-  _id: string;
-  Catalog_Name: string;
-  Catalog_Code: string;
-  Active: boolean;
-  Start_Date?: string;
-  End_Date?: string;
-  Description?: string;
-}
-
-export interface CatalogProductEntry {
-  _id: string;
-  Catalog_Code: string;
-  Product_Code: string;
-  Sequence?: number;
-}
-
-export interface PriceBookEntry {
-  _id: string;
-  PriceBook_Name: string;
-  PriceBook_Code: string;
-  Currency: string;
-  Active: boolean;
-  Description?: string;
-}
-
-export interface PriceListItemEntry {
-  _id: string;
-  PriceBook_Code: string;
-  Product_Code: string;
-  List_Price: number;
-  Effective_Date?: string;
-  Expiration_Date?: string;
-  Discount_Schedule?: string;
-}
-
-export interface SellingModelEntry {
-  _id: string;
-  Selling_Model_Name: string;
-  Selling_Model_Code: string;
-  Selling_Term_Type: string;
-  Billing_Frequency?: string;
-  Revenue_Recognition_Method?: string;
-  Product_Code: string;
-}
-
-export interface AttributeMappingEntry {
-  _id: string;
-  Product_Code: string;
-  Attribute_API_Name: string;
-  Required?: boolean;
-  Display_Order?: number;
-  Default_Value?: string;
-}
-
-// Unified entry type
-export type DataEntry =
-  | PicklistEntry
-  | PicklistValueEntry
-  | CategoryEntry
-  | AttributeEntry
-  | ProductEntry
-  | ProductRelationshipEntry
-  | CatalogEntry
-  | CatalogProductEntry
-  | PriceBookEntry
-  | PriceListItemEntry
-  | SellingModelEntry
-  | AttributeMappingEntry;
-
-// State type
-export interface ConfigDataState {
-  picklists: PicklistEntry[];
-  picklist_values: PicklistValueEntry[];
-  categories: CategoryEntry[];
-  attributes: AttributeEntry[];
-  products: ProductEntry[];
-  product_relationships: ProductRelationshipEntry[];
-  catalogs: CatalogEntry[];
-  catalog_products: CatalogProductEntry[];
-  pricebooks: PriceBookEntry[];
-  price_list_items: PriceListItemEntry[];
-  selling_models: SellingModelEntry[];
-  attribute_mappings: AttributeMappingEntry[];
+// Initialize state from pipeline config
+function createInitialState(): ConfigDataState {
+  const state: ConfigDataState = {};
+  for (const step of DEFAULT_PIPELINE_CONFIG.steps) {
+    state[step.id] = [];
+  }
+  return state;
 }
 
 // Action types
 type ConfigDataAction =
-  | { type: 'ADD_ENTRY'; objectType: keyof ConfigDataState; entry: DataEntry }
-  | { type: 'UPDATE_ENTRY'; objectType: keyof ConfigDataState; id: string; entry: Partial<DataEntry> }
-  | { type: 'DELETE_ENTRY'; objectType: keyof ConfigDataState; id: string }
-  | { type: 'SET_ENTRIES'; objectType: keyof ConfigDataState; entries: DataEntry[] }
+  | { type: 'ADD_ENTRY'; stepId: string; entry: DataEntry }
+  | { type: 'UPDATE_ENTRY'; stepId: string; id: string; entry: Partial<DataEntry> }
+  | { type: 'DELETE_ENTRY'; stepId: string; id: string }
+  | { type: 'SET_ENTRIES'; stepId: string; entries: DataEntry[] }
   | { type: 'CLEAR_ALL' }
   | { type: 'LOAD_DATA'; data: Partial<ConfigDataState> };
-
-// Initial state
-const initialState: ConfigDataState = {
-  picklists: [],
-  picklist_values: [],
-  categories: [],
-  attributes: [],
-  products: [],
-  product_relationships: [],
-  catalogs: [],
-  catalog_products: [],
-  pricebooks: [],
-  price_list_items: [],
-  selling_models: [],
-  attribute_mappings: [],
-};
 
 // Reducer
 function configDataReducer(state: ConfigDataState, action: ConfigDataAction): ConfigDataState {
@@ -191,34 +40,38 @@ function configDataReducer(state: ConfigDataState, action: ConfigDataAction): Co
     case 'ADD_ENTRY':
       return {
         ...state,
-        [action.objectType]: [...state[action.objectType], action.entry],
+        [action.stepId]: [...(state[action.stepId] || []), action.entry],
       };
     case 'UPDATE_ENTRY':
       return {
         ...state,
-        [action.objectType]: state[action.objectType].map((entry: DataEntry) =>
+        [action.stepId]: (state[action.stepId] || []).map((entry) =>
           entry._id === action.id ? { ...entry, ...action.entry } : entry
         ),
       };
     case 'DELETE_ENTRY':
       return {
         ...state,
-        [action.objectType]: state[action.objectType].filter(
-          (entry: DataEntry) => entry._id !== action.id
+        [action.stepId]: (state[action.stepId] || []).filter(
+          (entry) => entry._id !== action.id
         ),
       };
     case 'SET_ENTRIES':
       return {
         ...state,
-        [action.objectType]: action.entries,
+        [action.stepId]: action.entries,
       };
     case 'CLEAR_ALL':
-      return initialState;
-    case 'LOAD_DATA':
-      return {
-        ...state,
-        ...action.data,
-      };
+      return createInitialState();
+    case 'LOAD_DATA': {
+      const newState = { ...state };
+      for (const [key, value] of Object.entries(action.data)) {
+        if (value !== undefined) {
+          newState[key] = value;
+        }
+      }
+      return newState;
+    }
     default:
       return state;
   }
@@ -228,16 +81,34 @@ function configDataReducer(state: ConfigDataState, action: ConfigDataAction): Co
 interface ConfigDataContextType {
   state: ConfigDataState;
   pipelineConfig: typeof DEFAULT_PIPELINE_CONFIG;
-  addEntry: (objectType: keyof ConfigDataState, entry: DataEntry) => void;
-  updateEntry: (objectType: keyof ConfigDataState, id: string, entry: Partial<DataEntry>) => void;
-  deleteEntry: (objectType: keyof ConfigDataState, id: string) => void;
-  setEntries: (objectType: keyof ConfigDataState, entries: DataEntry[]) => void;
+  stepsByCategory: Record<string, PipelineStep[]>;
+  addEntry: (stepId: string, entry: Omit<DataEntry, '_id' | '_stepId'>) => string;
+  updateEntry: (stepId: string, id: string, entry: Partial<DataEntry>) => void;
+  deleteEntry: (stepId: string, id: string) => void;
+  setEntries: (stepId: string, entries: DataEntry[]) => void;
   clearAll: () => void;
   loadData: (data: Partial<ConfigDataState>) => void;
   getStepConfig: (stepId: string) => PipelineStep | undefined;
-  getReferenceOptions: (stepId: string, fieldName: string) => { value: string; label: string }[];
+  getReferenceOptions: (stepId: string, column: ColumnDefinition) => { value: string; label: string }[];
   getTotalEntryCount: () => number;
-  convertToWorksheetData: () => Record<string, { columns: string[]; data: Record<string, unknown>[] }>;
+  getEntryCountByStep: (stepId: string) => number;
+  convertToDeploymentPayload: () => DeploymentPayload;
+}
+
+// Deployment payload structure
+export interface DeploymentPayload {
+  steps: {
+    stepId: string;
+    stepName: string;
+    apiName: string;
+    endpoint: string;
+    method: string;
+    entries: Record<string, unknown>[];
+  }[];
+  metadata: {
+    totalEntries: number;
+    stepCount: number;
+  };
 }
 
 // Create context
@@ -250,23 +121,26 @@ function generateId(): string {
 
 // Provider component
 export function ConfigDataProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(configDataReducer, initialState);
+  const [state, dispatch] = useReducer(configDataReducer, null, createInitialState);
+  const stepsByCategory = useMemo(() => getStepsByCategory(DEFAULT_PIPELINE_CONFIG), []);
 
-  const addEntry = useCallback((objectType: keyof ConfigDataState, entry: DataEntry) => {
-    const entryWithId = { ...entry, _id: entry._id || generateId() };
-    dispatch({ type: 'ADD_ENTRY', objectType, entry: entryWithId });
+  const addEntry = useCallback((stepId: string, entry: Omit<DataEntry, '_id' | '_stepId'>): string => {
+    const id = generateId();
+    const entryWithId: DataEntry = { ...entry, _id: id, _stepId: stepId };
+    dispatch({ type: 'ADD_ENTRY', stepId, entry: entryWithId });
+    return id;
   }, []);
 
-  const updateEntry = useCallback((objectType: keyof ConfigDataState, id: string, entry: Partial<DataEntry>) => {
-    dispatch({ type: 'UPDATE_ENTRY', objectType, id, entry });
+  const updateEntry = useCallback((stepId: string, id: string, entry: Partial<DataEntry>) => {
+    dispatch({ type: 'UPDATE_ENTRY', stepId, id, entry });
   }, []);
 
-  const deleteEntry = useCallback((objectType: keyof ConfigDataState, id: string) => {
-    dispatch({ type: 'DELETE_ENTRY', objectType, id });
+  const deleteEntry = useCallback((stepId: string, id: string) => {
+    dispatch({ type: 'DELETE_ENTRY', stepId, id });
   }, []);
 
-  const setEntries = useCallback((objectType: keyof ConfigDataState, entries: DataEntry[]) => {
-    dispatch({ type: 'SET_ENTRIES', objectType, entries });
+  const setEntries = useCallback((stepId: string, entries: DataEntry[]) => {
+    dispatch({ type: 'SET_ENTRIES', stepId, entries });
   }, []);
 
   const clearAll = useCallback(() => {
@@ -282,83 +156,83 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   // Get reference options for dropdown fields
-  const getReferenceOptions = useCallback((stepId: string, fieldName: string): { value: string; label: string }[] => {
-    const step = getStepConfig(stepId);
-    if (!step) return [];
+  const getReferenceOptions = useCallback((stepId: string, column: ColumnDefinition): { value: string; label: string }[] => {
+    if (column.type !== 'reference' || !column.referenceTo) return [];
 
-    const column = step.columns.find(c => c.name === fieldName);
-    if (!column || column.type !== 'reference' || !column.referenceTo) return [];
+    const refStepId = column.referenceTo;
+    const refEntries = state[refStepId] || [];
+    const refStep = getStepConfig(refStepId);
 
-    const referenceTo = column.referenceTo;
-    const refEntries = state[referenceTo as keyof ConfigDataState] || [];
+    if (!refStep) return [];
 
-    // Determine which field to use as the value and label
-    switch (referenceTo) {
-      case 'picklists':
-        return (refEntries as PicklistEntry[]).map(e => ({
-          value: e.Picklist_Name,
-          label: e.Picklist_Name,
-        }));
-      case 'categories':
-        return (refEntries as CategoryEntry[]).map(e => ({
-          value: e.Category_Code,
-          label: `${e.Category_Name} (${e.Category_Code})`,
-        }));
-      case 'products':
-        return (refEntries as ProductEntry[]).map(e => ({
-          value: e.Product_Code,
-          label: `${e.Product_Name} (${e.Product_Code})`,
-        }));
-      case 'catalogs':
-        return (refEntries as CatalogEntry[]).map(e => ({
-          value: e.Catalog_Code,
-          label: `${e.Catalog_Name} (${e.Catalog_Code})`,
-        }));
-      case 'pricebooks':
-        return (refEntries as PriceBookEntry[]).map(e => ({
-          value: e.PriceBook_Code,
-          label: `${e.PriceBook_Name} (${e.PriceBook_Code})`,
-        }));
-      case 'attributes':
-        return (refEntries as AttributeEntry[]).map(e => ({
-          value: e.Attribute_API_Name,
-          label: `${e.Attribute_Name} (${e.Attribute_API_Name})`,
-        }));
-      default:
-        return [];
-    }
+    // Find the display field (usually 'Name')
+    const displayField = column.referenceDisplayField || 'Name';
+
+    return refEntries.map(e => ({
+      value: e._id,
+      label: (e[displayField] as string) || e._id,
+    }));
   }, [state, getStepConfig]);
 
   const getTotalEntryCount = useCallback(() => {
     return Object.values(state).reduce((total, entries) => total + entries.length, 0);
   }, [state]);
 
-  // Convert state to worksheet data format for deployment
-  const convertToWorksheetData = useCallback(() => {
-    const worksheetData: Record<string, { columns: string[]; data: Record<string, unknown>[] }> = {};
+  const getEntryCountByStep = useCallback((stepId: string) => {
+    return (state[stepId] || []).length;
+  }, [state]);
+
+  // Convert state to deployment payload format
+  const convertToDeploymentPayload = useCallback((): DeploymentPayload => {
+    const steps: DeploymentPayload['steps'] = [];
 
     for (const step of DEFAULT_PIPELINE_CONFIG.steps) {
-      const entries = state[step.id as keyof ConfigDataState];
-      if (entries && entries.length > 0) {
-        const columns = step.columns.map(c => c.name);
-        const data = entries.map((entry: DataEntry) => {
-          const record: Record<string, unknown> = {};
-          for (const col of columns) {
-            record[col] = (entry as unknown as Record<string, unknown>)[col];
-          }
-          return record;
-        });
+      const entries = state[step.id] || [];
+      if (entries.length === 0) continue;
 
-        worksheetData[step.worksheetName] = { columns, data };
-      }
+      // Convert entries to Salesforce format
+      const sfEntries = entries.map(entry => {
+        const sfEntry: Record<string, unknown> = {};
+
+        for (const col of step.columns) {
+          const value = entry[col.name];
+          if (value !== undefined && value !== null && value !== '') {
+            // For reference fields, resolve the ID
+            if (col.type === 'reference' && col.referenceTo) {
+              // Store the reference value - will be resolved during deployment
+              sfEntry[col.sfField || col.name] = value;
+            } else {
+              sfEntry[col.sfField || col.name] = value;
+            }
+          }
+        }
+
+        return sfEntry;
+      });
+
+      steps.push({
+        stepId: step.id,
+        stepName: step.name,
+        apiName: step.apiName,
+        endpoint: step.endpoint || `/services/data/v60.0/sobjects/${step.apiName}/`,
+        method: step.method || 'POST',
+        entries: sfEntries,
+      });
     }
 
-    return worksheetData;
-  }, [state]);
+    return {
+      steps,
+      metadata: {
+        totalEntries: getTotalEntryCount(),
+        stepCount: steps.length,
+      },
+    };
+  }, [state, getTotalEntryCount]);
 
   const value = useMemo(() => ({
     state,
     pipelineConfig: DEFAULT_PIPELINE_CONFIG,
+    stepsByCategory,
     addEntry,
     updateEntry,
     deleteEntry,
@@ -368,8 +242,9 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     getStepConfig,
     getReferenceOptions,
     getTotalEntryCount,
-    convertToWorksheetData,
-  }), [state, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, getStepConfig, getReferenceOptions, getTotalEntryCount, convertToWorksheetData]);
+    getEntryCountByStep,
+    convertToDeploymentPayload,
+  }), [state, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload]);
 
   return (
     <ConfigDataContext.Provider value={value}>

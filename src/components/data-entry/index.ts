@@ -1,4 +1,4 @@
-export { EntryForm } from './EntryForm';
-export { ObjectDataTable } from './ObjectDataTable';
-export { HierarchicalEntryForm } from './HierarchicalEntryForm';
-export { HierarchicalObjectPanel } from './HierarchicalObjectPanel';
+// Data entry components are now inline in the data entry page
+// These exports are kept for backwards compatibility but components may be removed
+
+export {};

@@ -12,21 +12,312 @@ import {
   Alert,
   Badge,
   Select,
+  Input,
 } from '@/components/ui';
-import { ConfigDataProvider, useConfigData } from '@/contexts/ConfigDataContext';
-import { ObjectDataTable } from '@/components/data-entry';
-import { convertSeedDataToConfigFormat } from '@/lib/schema/seedData';
-import type { SalesforceConnection } from '@/types';
+import { ConfigDataProvider, useConfigData, DataEntry } from '@/contexts/ConfigDataContext';
+import type { SalesforceConnection, PipelineStep, ColumnDefinition } from '@/types';
 
-// Wrapper component that uses the context
+// Entry Form Component
+function EntryForm({
+  step,
+  onSubmit,
+  onCancel,
+  initialData,
+}: {
+  step: PipelineStep;
+  onSubmit: (data: Record<string, unknown>) => void;
+  onCancel: () => void;
+  initialData?: DataEntry;
+}) {
+  const { getReferenceOptions } = useConfigData();
+  const [formData, setFormData] = useState<Record<string, unknown>>(() => {
+    if (initialData) {
+      return { ...initialData };
+    }
+    // Initialize with default values
+    const defaults: Record<string, unknown> = {};
+    for (const col of step.columns) {
+      if (col.defaultValue !== undefined) {
+        defaults[col.name] = col.defaultValue;
+      }
+    }
+    return defaults;
+  });
+
+  const handleChange = (name: string, value: unknown) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  const renderField = (col: ColumnDefinition) => {
+    const value = formData[col.name];
+
+    switch (col.type) {
+      case 'reference':
+        const options = getReferenceOptions(step.id, col);
+        return (
+          <Select
+            key={col.name}
+            label={col.name.replace(/_/g, ' ')}
+            value={(value as string) || ''}
+            onChange={(e) => handleChange(col.name, e.target.value)}
+            options={[
+              { value: '', label: `Select ${col.name.replace(/_/g, ' ')}...` },
+              ...options,
+            ]}
+            required={col.required}
+          />
+        );
+
+      case 'picklist':
+        return (
+          <Select
+            key={col.name}
+            label={col.name.replace(/_/g, ' ')}
+            value={(value as string) || String(col.defaultValue || '')}
+            onChange={(e) => handleChange(col.name, e.target.value)}
+            options={[
+              { value: '', label: `Select ${col.name.replace(/_/g, ' ')}...` },
+              ...(col.picklistValues || []).map(v => ({ value: v, label: v })),
+            ]}
+            required={col.required}
+          />
+        );
+
+      case 'boolean':
+        return (
+          <div key={col.name} className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id={col.name}
+              checked={Boolean(value)}
+              onChange={(e) => handleChange(col.name, e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            <label htmlFor={col.name} className="text-sm font-medium text-gray-700">
+              {col.name.replace(/_/g, ' ')}
+            </label>
+          </div>
+        );
+
+      case 'number':
+      case 'currency':
+        return (
+          <Input
+            key={col.name}
+            label={col.name.replace(/_/g, ' ')}
+            type="number"
+            value={(value as number) ?? ''}
+            onChange={(e) => handleChange(col.name, e.target.value ? Number(e.target.value) : null)}
+            required={col.required}
+            step={col.type === 'currency' ? '0.01' : '1'}
+          />
+        );
+
+      default:
+        return (
+          <Input
+            key={col.name}
+            label={col.name.replace(/_/g, ' ')}
+            type="text"
+            value={(value as string) || ''}
+            onChange={(e) => handleChange(col.name, e.target.value)}
+            required={col.required}
+          />
+        );
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {step.columns.map(renderField)}
+      </div>
+      <div className="flex justify-end gap-2 pt-4 border-t">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">
+          {initialData ? 'Update' : 'Add'} {step.name.replace(/s$/, '')}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// Step Panel Component
+function StepPanel({ step }: { step: PipelineStep }) {
+  const { state, addEntry, updateEntry, deleteEntry, getEntryCountByStep, getReferenceOptions } = useConfigData();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<DataEntry | null>(null);
+
+  const entries = state[step.id] || [];
+  const count = getEntryCountByStep(step.id);
+
+  const handleAdd = (data: Record<string, unknown>) => {
+    addEntry(step.id, data);
+    setShowForm(false);
+  };
+
+  const handleUpdate = (data: Record<string, unknown>) => {
+    if (editingEntry) {
+      updateEntry(step.id, editingEntry._id, data);
+      setEditingEntry(null);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Are you sure you want to delete this entry?')) {
+      deleteEntry(step.id, id);
+    }
+  };
+
+  // Get display value for reference fields
+  const getDisplayValue = (col: ColumnDefinition, value: unknown): string => {
+    if (!value) return '-';
+
+    if (col.type === 'reference' && col.referenceTo) {
+      const options = getReferenceOptions(step.id, col);
+      const option = options.find(o => o.value === value);
+      return option?.label || String(value);
+    }
+
+    if (col.type === 'boolean') {
+      return value ? 'Yes' : 'No';
+    }
+
+    if (col.type === 'currency') {
+      return `$${Number(value).toFixed(2)}`;
+    }
+
+    return String(value);
+  };
+
+  return (
+    <Card className="overflow-hidden">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full text-left"
+      >
+        <CardHeader className="flex flex-row items-center justify-between py-3 px-4 hover:bg-gray-50 transition-colors">
+          <div className="flex items-center gap-3">
+            <svg
+              className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <CardTitle className="text-base">{step.name}</CardTitle>
+            <Badge variant={count > 0 ? 'success' : 'default'}>
+              {count}
+            </Badge>
+          </div>
+          <span className="text-xs text-gray-500">{step.apiName}</span>
+        </CardHeader>
+      </button>
+
+      {isExpanded && (
+        <CardContent className="border-t">
+          {/* Add button */}
+          <div className="flex justify-end mb-4">
+            <Button size="sm" onClick={() => setShowForm(true)}>
+              + Add {step.name.replace(/s$/, '')}
+            </Button>
+          </div>
+
+          {/* Entry form */}
+          {(showForm || editingEntry) && (
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+              <h4 className="font-medium mb-3">
+                {editingEntry ? 'Edit' : 'Add'} {step.name.replace(/s$/, '')}
+              </h4>
+              <EntryForm
+                step={step}
+                onSubmit={editingEntry ? handleUpdate : handleAdd}
+                onCancel={() => {
+                  setShowForm(false);
+                  setEditingEntry(null);
+                }}
+                initialData={editingEntry || undefined}
+              />
+            </div>
+          )}
+
+          {/* Entries table */}
+          {entries.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {step.columns.slice(0, 5).map(col => (
+                      <th key={col.name} className="px-3 py-2 text-left font-medium text-gray-600">
+                        {col.name.replace(/_/g, ' ')}
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {entries.map(entry => (
+                    <tr key={entry._id} className="hover:bg-gray-50">
+                      {step.columns.slice(0, 5).map(col => (
+                        <td key={col.name} className="px-3 py-2 text-gray-900">
+                          {getDisplayValue(col, entry[col.name])}
+                        </td>
+                      ))}
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          onClick={() => setEditingEntry(entry)}
+                          className="text-blue-600 hover:text-blue-800 mr-2"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(entry._id)}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-center text-gray-500 py-4">
+              No entries yet. Click &quot;Add {step.name.replace(/s$/, '')}&quot; to create one.
+            </p>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// Main Data Entry Content
 function DataEntryContent() {
   const router = useRouter();
   const supabase = createClient();
-  const { state, pipelineConfig, getTotalEntryCount, convertToWorksheetData, clearAll, loadData } = useConfigData();
+  const {
+    state,
+    pipelineConfig,
+    stepsByCategory,
+    getTotalEntryCount,
+    clearAll,
+    convertToDeploymentPayload,
+  } = useConfigData();
 
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
   const [selectedConnection, setSelectedConnection] = useState<string>('');
-  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set(['picklists']));
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Fetch connections
   useEffect(() => {
@@ -51,42 +342,16 @@ function DataEntryContent() {
     fetchConnections();
   }, [supabase]);
 
-  const toggleStep = (stepId: string) => {
-    setExpandedSteps(prev => {
-      const next = new Set(prev);
-      if (next.has(stepId)) {
-        next.delete(stepId);
-      } else {
-        next.add(stepId);
-      }
-      return next;
-    });
-  };
-
-  const expandAll = () => {
-    setExpandedSteps(new Set(pipelineConfig.steps.map(s => s.id)));
-  };
-
-  const collapseAll = () => {
-    setExpandedSteps(new Set());
-  };
+  const totalEntries = getTotalEntryCount();
 
   const handleDeploy = () => {
     if (!selectedConnection) return;
 
-    const worksheetData = convertToWorksheetData();
-
-    // Convert to the format expected by deployment page
-    const worksheets = Object.entries(worksheetData).map(([name, { columns, data }]) => ({
-      name,
-      headers: columns,
-      data: data.map((row, index) => ({ ...row, index })),
-    }));
+    const payload = convertToDeploymentPayload();
 
     sessionStorage.setItem('deploymentData', JSON.stringify({
       connectionId: selectedConnection,
-      fileName: 'Manual Data Entry',
-      worksheets,
+      payload,
     }));
 
     router.push('/dashboard/deployment');
@@ -98,56 +363,37 @@ function DataEntryContent() {
     }
   };
 
-  const handleLoadSampleData = () => {
-    if (totalEntries > 0) {
-      if (!confirm('This will replace all existing data with sample data. Continue?')) {
-        return;
-      }
-    }
-    const seedData = convertSeedDataToConfigFormat();
-    loadData(seedData);
+  const handleExportJSON = () => {
+    const payload = convertToDeploymentPayload();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deployment-config-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
-
-  const totalEntries = getTotalEntryCount();
-
-  // Group steps by category for visual hierarchy
-  const stepGroups = [
-    {
-      title: 'Foundation Objects',
-      description: 'Basic configuration objects with no dependencies',
-      steps: pipelineConfig.steps.filter(s => s.dependsOn.length === 0),
-      color: 'bg-blue-50 border-blue-200',
-    },
-    {
-      title: 'Dependent Objects',
-      description: 'Objects that reference foundation objects',
-      steps: pipelineConfig.steps.filter(s => s.dependsOn.length > 0 && !s.dependsOn.includes('products')),
-      color: 'bg-green-50 border-green-200',
-    },
-    {
-      title: 'Product-Related Objects',
-      description: 'Objects related to products',
-      steps: pipelineConfig.steps.filter(s => s.dependsOn.includes('products')),
-      color: 'bg-purple-50 border-purple-200',
-    },
-  ];
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Comprehensive Data Entry</h1>
+          <h1 className="text-2xl font-semibold text-gray-900">Hierarchical Data Entry</h1>
           <p className="text-gray-600 mt-1">
-            Enter all configuration data in one place with automatic relationship mapping
+            Configure Salesforce Revenue Cloud objects with automatic relationship mapping
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge variant={totalEntries > 0 ? 'success' : 'default'}>
-            {totalEntries} total entries
-          </Badge>
-        </div>
+        <Badge variant={totalEntries > 0 ? 'success' : 'default'}>
+          {totalEntries} total entries
+        </Badge>
       </div>
+
+      {statusMessage && (
+        <Alert variant={statusMessage.type === 'error' ? 'error' : 'success'}>
+          {statusMessage.message}
+        </Alert>
+      )}
 
       {/* Connection Selector */}
       <Card>
@@ -155,14 +401,16 @@ function DataEntryContent() {
           <div className="flex items-center gap-4">
             <div className="flex-1">
               <Select
-                label="Target Connection"
+                label="Target Salesforce Connection"
                 value={selectedConnection}
                 onChange={(e) => setSelectedConnection(e.target.value)}
-                options={connections.map((c) => ({
-                  value: c.id,
-                  label: `${c.name} (${c.instance_url})`,
-                }))}
-                placeholder="Select a Salesforce connection"
+                options={[
+                  { value: '', label: 'Select a connection...' },
+                  ...connections.map((c) => ({
+                    value: c.id,
+                    label: `${c.name} (${c.instance_url})`,
+                  })),
+                ]}
               />
             </div>
             {connections.length === 0 && (
@@ -177,117 +425,62 @@ function DataEntryContent() {
         </CardContent>
       </Card>
 
-      {/* Relationship Diagram */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Object Relationships</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2 items-center text-sm">
-            {pipelineConfig.steps.map((step, index) => {
-              const entryCount = state[step.id as keyof typeof state]?.length || 0;
-              return (
-                <React.Fragment key={step.id}>
-                  <button
-                    onClick={() => {
-                      setExpandedSteps(new Set([step.id]));
-                      document.getElementById(`step-${step.id}`)?.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                    className={`px-3 py-1.5 rounded-lg border transition-colors ${
-                      entryCount > 0
-                        ? 'bg-green-50 border-green-300 text-green-800 hover:bg-green-100'
-                        : 'bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    {step.name}
-                    <span className="ml-1 text-xs">({entryCount})</span>
-                  </button>
-                  {index < pipelineConfig.steps.length - 1 && (
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Controls */}
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={expandAll}>
-            Expand All
-          </Button>
-          <Button variant="outline" size="sm" onClick={collapseAll}>
-            Collapse All
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleLoadSampleData}
-            className="text-blue-600 border-blue-200 hover:bg-blue-50"
-          >
+          <Button variant="outline" size="sm" onClick={handleExportJSON} disabled={totalEntries === 0}>
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Load Sample Data
+            Export JSON
           </Button>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleClear} disabled={totalEntries === 0}>
-            Clear All Data
+            Clear All
           </Button>
           <Button onClick={handleDeploy} disabled={totalEntries === 0 || !selectedConnection}>
-            Proceed to Deployment
+            Proceed to Deployment ({totalEntries})
           </Button>
         </div>
       </div>
 
-      {/* Data Entry Sections */}
-      {stepGroups.map((group) => (
-        <div key={group.title} className="space-y-4">
-          <div className={`p-4 rounded-lg border ${group.color}`}>
-            <h2 className="font-semibold text-gray-900">{group.title}</h2>
-            <p className="text-sm text-gray-600">{group.description}</p>
-          </div>
-
-          <div className="space-y-4 pl-4 border-l-2 border-gray-200">
-            {group.steps.map((step) => (
-              <div key={step.id} id={`step-${step.id}`}>
-                <ObjectDataTable
-                  step={step}
-                  expanded={expandedSteps.has(step.id)}
-                  onToggle={() => toggleStep(step.id)}
-                />
-              </div>
+      {/* Data Entry Sections by Category */}
+      {Object.entries(stepsByCategory).map(([category, steps]) => (
+        <div key={category} className="space-y-3">
+          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+            {category}
+          </h2>
+          <div className="space-y-2 ml-4">
+            {steps.map(step => (
+              <StepPanel key={step.id} step={step} />
             ))}
           </div>
         </div>
       ))}
 
-      {/* Summary */}
+      {/* Summary Card */}
       {totalEntries > 0 && (
-        <Card>
+        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
           <CardHeader>
-            <CardTitle>Entry Summary</CardTitle>
+            <CardTitle>Deployment Summary</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
               {pipelineConfig.steps.map((step) => {
-                const count = state[step.id as keyof typeof state]?.length || 0;
+                const count = (state[step.id] || []).length;
                 return (
                   <div
                     key={step.id}
                     className={`p-3 rounded-lg text-center ${
-                      count > 0 ? 'bg-green-50' : 'bg-gray-50'
+                      count > 0 ? 'bg-white shadow-sm' : 'bg-gray-50'
                     }`}
                   >
-                    <p className="text-sm font-medium text-gray-900 truncate" title={step.name}>
+                    <p className="text-xs font-medium text-gray-600 truncate" title={step.name}>
                       {step.name}
                     </p>
-                    <p className={`text-2xl font-semibold ${count > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                    <p className={`text-xl font-bold ${count > 0 ? 'text-blue-600' : 'text-gray-300'}`}>
                       {count}
                     </p>
                   </div>
@@ -296,7 +489,7 @@ function DataEntryContent() {
             </div>
 
             <div className="mt-6 flex justify-end">
-              <Button onClick={handleDeploy} disabled={!selectedConnection}>
+              <Button onClick={handleDeploy} disabled={!selectedConnection} className="px-6">
                 Deploy {totalEntries} Entries to Salesforce
               </Button>
             </div>

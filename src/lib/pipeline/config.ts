@@ -1,319 +1,421 @@
 /**
  * Pipeline Configuration
  *
- * This module defines the configurable deployment pipeline for Salesforce RCA objects.
+ * This module defines the configurable deployment pipeline for Salesforce Revenue Cloud objects.
  * The pipeline handles object hierarchies, execution order, and ID dependencies.
+ *
+ * Based on Salesforce Revenue Cloud API endpoints:
+ * - /services/data/v60.0/sobjects/AttributePicklist/
+ * - /services/data/v60.0/sobjects/AttributePicklistValue/
+ * - /services/data/v60.0/sobjects/AttributeDefinition/
+ * - /services/data/v60.0/sobjects/ProductClassification/
+ * - /services/data/v60.0/sobjects/ProductClassificationAttr/
+ * - /services/data/v60.0/sobjects/ProductCategory/
+ * - /services/data/v60.0/sobjects/ProductCatalog/
+ * - /services/data/v60.0/sobjects/Product2/
+ * - /services/data/v60.0/sobjects/ProductCategoryProduct/
+ * - /services/data/v60.0/sobjects/Pricebook2/
+ * - /services/data/v60.0/sobjects/PricebookEntry/
+ * - /services/data/v60.0/sobjects/ProductSellingModel/
+ * - /services/data/v60.0/sobjects/ProductSellingModelOption/
  */
 
 import type { PipelineStep, PipelineConfig } from '@/types';
 
 /**
- * Default Pipeline Configuration for Salesforce Revenue Cloud Advanced
+ * Default Pipeline Configuration for Salesforce Revenue Cloud
  *
  * Objects are deployed in dependency order:
- * 1. Picklists (no dependencies)
- * 2. Picklist Values (depends on Picklists)
- * 3. Categories (self-referential for hierarchy)
- * 4. Attributes (depends on Picklists)
- * 5. Products (standalone first)
- * 6. Product Relationships (depends on Products)
- * 7. Catalogs (no dependencies)
- * 8. Catalog Products (depends on Catalogs and Products)
- * 9. Price Books (no dependencies)
- * 10. Price List Items (depends on Price Books and Products)
- * 11. Selling Models (depends on Products)
- * 12. Attribute Mappings (depends on Products and Attributes)
+ * 1. Attribute Picklists (no dependencies)
+ * 2. Attribute Picklist Values (depends on Picklists)
+ * 3. Attribute Definitions (depends on Picklists)
+ * 4. Product Classifications (no dependencies)
+ * 5. Product Classification Attributes (depends on Classifications and Attribute Definitions)
+ * 6. Product Catalogs (no dependencies)
+ * 7. Product Categories (depends on Catalogs, self-referential for hierarchy)
+ * 8. Products (standalone)
+ * 9. Product Category Products (depends on Categories and Products)
+ * 10. Product Classification Links (links classifications to products)
+ * 11. Price Books (no dependencies)
+ * 12. Price Book Entries (depends on Price Books and Products)
+ * 13. Product Selling Models (no dependencies)
+ * 14. Product Selling Model Options (depends on Selling Models and Products)
  */
 export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
-  id: 'default-rca-pipeline',
-  name: 'Default RCA Pipeline',
-  description: 'Standard deployment pipeline for Salesforce Revenue Cloud Advanced',
-  version: '1.0.0',
+  id: 'salesforce-revenue-cloud-pipeline',
+  name: 'Salesforce Revenue Cloud Pipeline',
+  description: 'Deployment pipeline for Salesforce Revenue Cloud configuration',
+  version: '2.0.0',
   steps: [
+    // ============================================
+    // ATTRIBUTE MANAGEMENT
+    // ============================================
     {
       id: 'picklists',
-      name: 'Picklists',
-      apiName: 'REVVY__MnPicklist__c',
-      worksheetName: 'Picklists',
+      name: 'Attribute Picklists',
+      apiName: 'AttributePicklist',
+      endpoint: '/services/data/v60.0/sobjects/AttributePicklist/',
+      method: 'POST',
+      worksheetName: 'AttributePicklists',
       order: 1,
       dependsOn: [],
       columns: [
-        { name: 'Picklist_Name', type: 'string', required: true },
-        { name: 'Picklist_API_Name', type: 'string', required: true },
-        { name: 'Active', type: 'boolean', required: true },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'Code', type: 'string', required: true, sfField: 'Code' },
+        { name: 'Status', type: 'picklist', required: true, sfField: 'Status', defaultValue: 'Active', picklistValues: ['Active', 'Inactive'] },
+        { name: 'DataType', type: 'picklist', required: true, sfField: 'DataType', defaultValue: 'Text', picklistValues: ['Text', 'Number', 'Date', 'Boolean'] },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
       ],
       parentIdMappings: [],
     },
     {
       id: 'picklist_values',
-      name: 'Picklist Values',
-      apiName: 'REVVY__MnPicklistValue__c',
-      worksheetName: 'Picklist_Values',
+      name: 'Attribute Picklist Values',
+      apiName: 'AttributePicklistValue',
+      endpoint: '/services/data/v60.0/sobjects/AttributePicklistValue/',
+      method: 'POST',
+      worksheetName: 'AttributePicklistValues',
       order: 2,
       dependsOn: ['picklists'],
       columns: [
-        { name: 'Picklist_Name', type: 'reference', required: true, referenceTo: 'picklists' },
-        { name: 'Value_Label', type: 'string', required: true },
-        { name: 'Value_API_Name', type: 'string', required: true },
-        { name: 'Display_Order', type: 'number', required: false },
-        { name: 'Active', type: 'boolean', required: true },
-        { name: 'Is_Default', type: 'boolean', required: false },
+        { name: 'PicklistId', type: 'reference', required: true, sfField: 'PicklistId', referenceTo: 'picklists', referenceDisplayField: 'Name' },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'Code', type: 'string', required: true, sfField: 'Code' },
+        { name: 'Status', type: 'picklist', required: true, sfField: 'Status', defaultValue: 'Active', picklistValues: ['Active', 'Inactive'] },
+        { name: 'DisplayValue', type: 'string', required: true, sfField: 'DisplayValue' },
+        { name: 'Value', type: 'string', required: true, sfField: 'Value' },
+        { name: 'Sequence', type: 'number', required: false, sfField: 'Sequence', defaultValue: 1 },
+        { name: 'IsDefault', type: 'boolean', required: false, sfField: 'IsDefault', defaultValue: false },
       ],
       parentIdMappings: [
         {
-          field: 'Picklist_Name',
+          field: 'PicklistId',
           parentStep: 'picklists',
-          parentField: 'Picklist_Name',
-        },
-      ],
-    },
-    {
-      id: 'categories',
-      name: 'Categories',
-      apiName: 'REVVY__MnCategory__c',
-      worksheetName: 'Categories',
-      order: 3,
-      dependsOn: [],
-      columns: [
-        { name: 'Category_Name', type: 'string', required: true },
-        { name: 'Category_Code', type: 'string', required: true },
-        { name: 'Parent_Category_Code', type: 'reference', required: false, referenceTo: 'categories' },
-        { name: 'Sequence', type: 'number', required: false },
-        { name: 'Active', type: 'boolean', required: true },
-        { name: 'Description', type: 'string', required: false },
-      ],
-      parentIdMappings: [
-        {
-          field: 'Parent_Category_Code',
-          parentStep: 'categories',
-          parentField: 'Category_Code',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
       ],
     },
     {
       id: 'attributes',
-      name: 'Attributes',
-      apiName: 'REVVY__MnAttribute__c',
-      worksheetName: 'Attributes',
-      order: 4,
+      name: 'Attribute Definitions',
+      apiName: 'AttributeDefinition',
+      endpoint: '/services/data/v60.0/sobjects/AttributeDefinition/',
+      method: 'POST',
+      worksheetName: 'AttributeDefinitions',
+      order: 3,
       dependsOn: ['picklists'],
       columns: [
-        { name: 'Attribute_Name', type: 'string', required: true },
-        { name: 'Attribute_API_Name', type: 'string', required: true },
-        { name: 'Data_Type', type: 'string', required: true },
-        { name: 'Display_Type', type: 'string', required: false },
-        { name: 'Picklist_Name', type: 'reference', required: false, referenceTo: 'picklists' },
-        { name: 'Sequence', type: 'number', required: false },
-        { name: 'Required', type: 'boolean', required: false },
-        { name: 'Default_Value', type: 'string', required: false },
-        { name: 'Help_Text', type: 'string', required: false },
-        { name: 'Min_Value', type: 'number', required: false },
-        { name: 'Max_Value', type: 'number', required: false },
-        { name: 'Max_Length', type: 'number', required: false },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'Label', type: 'string', required: true, sfField: 'Label' },
+        { name: 'DataType', type: 'picklist', required: true, sfField: 'DataType', picklistValues: ['Text', 'Number', 'Currency', 'Date', 'Checkbox', 'Picklist', 'Percent'] },
+        { name: 'PicklistId', type: 'reference', required: false, sfField: 'PicklistId', referenceTo: 'picklists', referenceDisplayField: 'Name' },
+        { name: 'IsActive', type: 'boolean', required: true, sfField: 'IsActive', defaultValue: true },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
       ],
       parentIdMappings: [
         {
-          field: 'Picklist_Name',
+          field: 'PicklistId',
           parentStep: 'picklists',
-          parentField: 'Picklist_Name',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
       ],
     },
+
+    // ============================================
+    // PRODUCT CLASSIFICATION
+    // ============================================
+    {
+      id: 'classifications',
+      name: 'Product Classifications',
+      apiName: 'ProductClassification',
+      endpoint: '/services/data/v60.0/sobjects/ProductClassification/',
+      method: 'POST',
+      worksheetName: 'ProductClassifications',
+      order: 4,
+      dependsOn: [],
+      columns: [
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'Code', type: 'string', required: true, sfField: 'Code' },
+        { name: 'Status', type: 'picklist', required: true, sfField: 'Status', defaultValue: 'Active', picklistValues: ['Active', 'Inactive'] },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
+      ],
+      parentIdMappings: [],
+    },
+    {
+      id: 'classification_attributes',
+      name: 'Classification Attributes',
+      apiName: 'ProductClassificationAttr',
+      endpoint: '/services/data/v60.0/sobjects/ProductClassificationAttr/',
+      method: 'POST',
+      worksheetName: 'ClassificationAttributes',
+      order: 5,
+      dependsOn: ['classifications', 'attributes'],
+      columns: [
+        { name: 'ProductClassificationId', type: 'reference', required: true, sfField: 'ProductClassificationId', referenceTo: 'classifications', referenceDisplayField: 'Name' },
+        { name: 'AttributeDefinitionId', type: 'reference', required: true, sfField: 'AttributeDefinitionId', referenceTo: 'attributes', referenceDisplayField: 'Name' },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'Status', type: 'picklist', required: true, sfField: 'Status', defaultValue: 'Active', picklistValues: ['Active', 'Inactive'] },
+        { name: 'Sequence', type: 'number', required: false, sfField: 'Sequence' },
+        { name: 'IsRequired', type: 'boolean', required: false, sfField: 'IsRequired', defaultValue: false },
+      ],
+      parentIdMappings: [
+        {
+          field: 'ProductClassificationId',
+          parentStep: 'classifications',
+          parentField: 'Name',
+          parentIdField: 'id',
+        },
+        {
+          field: 'AttributeDefinitionId',
+          parentStep: 'attributes',
+          parentField: 'Name',
+          parentIdField: 'id',
+        },
+      ],
+    },
+
+    // ============================================
+    // PRODUCT CATALOG
+    // ============================================
+    {
+      id: 'catalogs',
+      name: 'Product Catalogs',
+      apiName: 'ProductCatalog',
+      endpoint: '/services/data/v60.0/sobjects/ProductCatalog/',
+      method: 'POST',
+      worksheetName: 'ProductCatalogs',
+      order: 6,
+      dependsOn: [],
+      columns: [
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'CatalogCode', type: 'string', required: false, sfField: 'CatalogCode' },
+        { name: 'IsActive', type: 'boolean', required: true, sfField: 'IsActive', defaultValue: true },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
+      ],
+      parentIdMappings: [],
+    },
+    {
+      id: 'categories',
+      name: 'Product Categories',
+      apiName: 'ProductCategory',
+      endpoint: '/services/data/v60.0/sobjects/ProductCategory/',
+      method: 'POST',
+      worksheetName: 'ProductCategories',
+      order: 7,
+      dependsOn: ['catalogs'],
+      columns: [
+        { name: 'CatalogId', type: 'reference', required: true, sfField: 'CatalogId', referenceTo: 'catalogs', referenceDisplayField: 'Name' },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'CategoryCode', type: 'string', required: true, sfField: 'CategoryCode' },
+        { name: 'ParentCategoryId', type: 'reference', required: false, sfField: 'ParentCategoryId', referenceTo: 'categories', referenceDisplayField: 'Name' },
+        { name: 'IsActive', type: 'boolean', required: true, sfField: 'IsActive', defaultValue: true },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
+        { name: 'SortOrder', type: 'number', required: false, sfField: 'SortOrder' },
+      ],
+      parentIdMappings: [
+        {
+          field: 'CatalogId',
+          parentStep: 'catalogs',
+          parentField: 'Name',
+          parentIdField: 'id',
+        },
+        {
+          field: 'ParentCategoryId',
+          parentStep: 'categories',
+          parentField: 'Name',
+          parentIdField: 'id',
+        },
+      ],
+    },
+
+    // ============================================
+    // PRODUCTS
+    // ============================================
     {
       id: 'products',
       name: 'Products',
       apiName: 'Product2',
+      endpoint: '/services/data/v60.0/sobjects/Product2/',
+      method: 'POST',
       worksheetName: 'Products',
-      order: 5,
-      dependsOn: ['categories'],
-      columns: [
-        { name: 'Product_Code', type: 'string', required: true },
-        { name: 'Product_Name', type: 'string', required: true },
-        { name: 'Product_Type', type: 'string', required: true },
-        { name: 'Description', type: 'string', required: false },
-        { name: 'Product_Family', type: 'string', required: false },
-        { name: 'Active', type: 'boolean', required: true },
-        { name: 'Pricing_Method', type: 'string', required: false },
-        { name: 'Revenue_Recognition_Rule', type: 'string', required: false },
-        { name: 'Tax_Treatment', type: 'string', required: false },
-        { name: 'Parent_Product_Code', type: 'reference', required: false, referenceTo: 'products' },
-        { name: 'Category_Code', type: 'reference', required: false, referenceTo: 'categories' },
-      ],
-      parentIdMappings: [
-        {
-          field: 'Parent_Product_Code',
-          parentStep: 'products',
-          parentField: 'Product_Code',
-        },
-        {
-          field: 'Category_Code',
-          parentStep: 'categories',
-          parentField: 'Category_Code',
-        },
-      ],
-    },
-    {
-      id: 'product_relationships',
-      name: 'Product Relationships',
-      apiName: 'REVVY__MnProductRelationship__c',
-      worksheetName: 'ProductRelationships',
-      order: 6,
-      dependsOn: ['products'],
-      columns: [
-        { name: 'Parent_Product_Code', type: 'reference', required: true, referenceTo: 'products' },
-        { name: 'Child_Product_Code', type: 'reference', required: true, referenceTo: 'products' },
-        { name: 'Relationship_Type', type: 'string', required: true },
-        { name: 'Required', type: 'boolean', required: false },
-        { name: 'Min_Quantity', type: 'number', required: false },
-        { name: 'Max_Quantity', type: 'number', required: false },
-        { name: 'Default_Quantity', type: 'number', required: false },
-      ],
-      parentIdMappings: [
-        {
-          field: 'Parent_Product_Code',
-          parentStep: 'products',
-          parentField: 'Product_Code',
-        },
-        {
-          field: 'Child_Product_Code',
-          parentStep: 'products',
-          parentField: 'Product_Code',
-        },
-      ],
-    },
-    {
-      id: 'catalogs',
-      name: 'Catalogs',
-      apiName: 'REVVY__MnCatalog__c',
-      worksheetName: 'Catalogs',
-      order: 7,
+      order: 8,
       dependsOn: [],
       columns: [
-        { name: 'Catalog_Name', type: 'string', required: true },
-        { name: 'Catalog_Code', type: 'string', required: true },
-        { name: 'Active', type: 'boolean', required: true },
-        { name: 'Start_Date', type: 'date', required: false },
-        { name: 'End_Date', type: 'date', required: false },
-        { name: 'Description', type: 'string', required: false },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'ProductCode', type: 'string', required: true, sfField: 'ProductCode' },
+        { name: 'StockKeepingUnit', type: 'string', required: false, sfField: 'StockKeepingUnit' },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
+        { name: 'Family', type: 'string', required: false, sfField: 'Family' },
+        { name: 'IsActive', type: 'boolean', required: true, sfField: 'IsActive', defaultValue: true },
+        { name: 'ProductClass', type: 'picklist', required: false, sfField: 'ProductClass', picklistValues: ['Simple', 'VariationParent', 'Variation', 'Bundle', 'Set'] },
+        { name: 'QuantityUnitOfMeasure', type: 'string', required: false, sfField: 'QuantityUnitOfMeasure' },
       ],
       parentIdMappings: [],
     },
     {
-      id: 'catalog_products',
-      name: 'Catalog Products',
-      apiName: 'REVVY__MnCatalogProduct__c',
-      worksheetName: 'Catalog_Products',
-      order: 8,
-      dependsOn: ['catalogs', 'products'],
+      id: 'category_products',
+      name: 'Category Products',
+      apiName: 'ProductCategoryProduct',
+      endpoint: '/services/data/v60.0/sobjects/ProductCategoryProduct/',
+      method: 'POST',
+      worksheetName: 'CategoryProducts',
+      order: 9,
+      dependsOn: ['categories', 'products'],
       columns: [
-        { name: 'Catalog_Code', type: 'reference', required: true, referenceTo: 'catalogs' },
-        { name: 'Product_Code', type: 'reference', required: true, referenceTo: 'products' },
-        { name: 'Sequence', type: 'number', required: false },
+        { name: 'ProductCategoryId', type: 'reference', required: true, sfField: 'ProductCategoryId', referenceTo: 'categories', referenceDisplayField: 'Name' },
+        { name: 'ProductId', type: 'reference', required: true, sfField: 'ProductId', referenceTo: 'products', referenceDisplayField: 'Name' },
+        { name: 'IsPrimaryCategory', type: 'boolean', required: false, sfField: 'IsPrimaryCategory', defaultValue: false },
       ],
       parentIdMappings: [
         {
-          field: 'Catalog_Code',
-          parentStep: 'catalogs',
-          parentField: 'Catalog_Code',
+          field: 'ProductCategoryId',
+          parentStep: 'categories',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
         {
-          field: 'Product_Code',
+          field: 'ProductId',
           parentStep: 'products',
-          parentField: 'Product_Code',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
       ],
     },
+
+    // ============================================
+    // PRODUCT CLASSIFICATION LINKS
+    // ============================================
+    {
+      id: 'product_classifications',
+      name: 'Product Classification Links',
+      apiName: 'Product2',
+      endpoint: '/services/data/v60.0/sobjects/Product2/',
+      method: 'PATCH',
+      worksheetName: 'ProductClassificationLinks',
+      order: 10,
+      dependsOn: ['products', 'classifications'],
+      columns: [
+        { name: 'ProductId', type: 'reference', required: true, sfField: 'Id', referenceTo: 'products', referenceDisplayField: 'Name' },
+        { name: 'ProductClassificationId', type: 'reference', required: true, sfField: 'BasedOnId', referenceTo: 'classifications', referenceDisplayField: 'Name' },
+        { name: 'ConfigureDuringSale', type: 'picklist', required: false, sfField: 'ConfigureDuringSale', defaultValue: 'Allowed', picklistValues: ['Allowed', 'Not Allowed', 'Required'] },
+      ],
+      parentIdMappings: [
+        {
+          field: 'ProductId',
+          parentStep: 'products',
+          parentField: 'Name',
+          parentIdField: 'id',
+        },
+        {
+          field: 'ProductClassificationId',
+          parentStep: 'classifications',
+          parentField: 'Name',
+          parentIdField: 'id',
+        },
+      ],
+    },
+
+    // ============================================
+    // PRICING
+    // ============================================
     {
       id: 'pricebooks',
       name: 'Price Books',
       apiName: 'Pricebook2',
+      endpoint: '/services/data/v60.0/sobjects/Pricebook2/',
+      method: 'POST',
       worksheetName: 'PriceBooks',
-      order: 9,
+      order: 11,
       dependsOn: [],
       columns: [
-        { name: 'PriceBook_Name', type: 'string', required: true },
-        { name: 'PriceBook_Code', type: 'string', required: true },
-        { name: 'Currency', type: 'string', required: true },
-        { name: 'Active', type: 'boolean', required: true },
-        { name: 'Description', type: 'string', required: false },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
+        { name: 'IsActive', type: 'boolean', required: true, sfField: 'IsActive', defaultValue: true },
       ],
       parentIdMappings: [],
     },
     {
-      id: 'price_list_items',
-      name: 'Price List Items',
+      id: 'pricebook_entries',
+      name: 'Price Book Entries',
       apiName: 'PricebookEntry',
-      worksheetName: 'PriceListItems',
-      order: 10,
+      endpoint: '/services/data/v60.0/sobjects/PricebookEntry/',
+      method: 'POST',
+      worksheetName: 'PriceBookEntries',
+      order: 12,
       dependsOn: ['pricebooks', 'products'],
       columns: [
-        { name: 'PriceBook_Code', type: 'reference', required: true, referenceTo: 'pricebooks' },
-        { name: 'Product_Code', type: 'reference', required: true, referenceTo: 'products' },
-        { name: 'List_Price', type: 'currency', required: true },
-        { name: 'Effective_Date', type: 'date', required: false },
-        { name: 'Expiration_Date', type: 'date', required: false },
-        { name: 'Discount_Schedule', type: 'string', required: false },
+        { name: 'Pricebook2Id', type: 'reference', required: true, sfField: 'Pricebook2Id', referenceTo: 'pricebooks', referenceDisplayField: 'Name' },
+        { name: 'Product2Id', type: 'reference', required: true, sfField: 'Product2Id', referenceTo: 'products', referenceDisplayField: 'Name' },
+        { name: 'UnitPrice', type: 'currency', required: true, sfField: 'UnitPrice' },
+        { name: 'IsActive', type: 'boolean', required: true, sfField: 'IsActive', defaultValue: true },
+        { name: 'UseStandardPrice', type: 'boolean', required: false, sfField: 'UseStandardPrice', defaultValue: false },
       ],
       parentIdMappings: [
         {
-          field: 'PriceBook_Code',
+          field: 'Pricebook2Id',
           parentStep: 'pricebooks',
-          parentField: 'PriceBook_Code',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
         {
-          field: 'Product_Code',
+          field: 'Product2Id',
           parentStep: 'products',
-          parentField: 'Product_Code',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
       ],
     },
+
+    // ============================================
+    // SELLING MODELS
+    // ============================================
     {
       id: 'selling_models',
-      name: 'Selling Models',
-      apiName: 'REVVY__MnSellingModel__c',
-      worksheetName: 'SellingModels',
-      order: 11,
-      dependsOn: ['products'],
+      name: 'Product Selling Models',
+      apiName: 'ProductSellingModel',
+      endpoint: '/services/data/v60.0/sobjects/ProductSellingModel/',
+      method: 'POST',
+      worksheetName: 'ProductSellingModels',
+      order: 13,
+      dependsOn: [],
       columns: [
-        { name: 'Selling_Model_Name', type: 'string', required: true },
-        { name: 'Selling_Model_Code', type: 'string', required: true },
-        { name: 'Selling_Term_Type', type: 'string', required: true },
-        { name: 'Billing_Frequency', type: 'string', required: false },
-        { name: 'Revenue_Recognition_Method', type: 'string', required: false },
-        { name: 'Product_Code', type: 'reference', required: true, referenceTo: 'products' },
+        { name: 'Name', type: 'string', required: true, sfField: 'Name' },
+        { name: 'SellingModelType', type: 'picklist', required: true, sfField: 'SellingModelType', picklistValues: ['OneTime', 'TermDefined', 'Evergreen'] },
+        { name: 'PricingTermUnit', type: 'picklist', required: false, sfField: 'PricingTermUnit', picklistValues: ['Monthly', 'Yearly', 'Daily', 'Weekly'] },
+        { name: 'PricingTerm', type: 'number', required: false, sfField: 'PricingTerm' },
+        { name: 'Status', type: 'picklist', required: true, sfField: 'Status', defaultValue: 'Active', picklistValues: ['Active', 'Inactive'] },
+        { name: 'Description', type: 'string', required: false, sfField: 'Description' },
       ],
-      parentIdMappings: [
-        {
-          field: 'Product_Code',
-          parentStep: 'products',
-          parentField: 'Product_Code',
-        },
-      ],
+      parentIdMappings: [],
     },
     {
-      id: 'attribute_mappings',
-      name: 'Attribute Mappings',
-      apiName: 'REVVY__MnProductAttribute__c',
-      worksheetName: 'AttributeMappings',
-      order: 12,
-      dependsOn: ['products', 'attributes'],
+      id: 'selling_model_options',
+      name: 'Selling Model Options',
+      apiName: 'ProductSellingModelOption',
+      endpoint: '/services/data/v60.0/sobjects/ProductSellingModelOption/',
+      method: 'POST',
+      worksheetName: 'SellingModelOptions',
+      order: 14,
+      dependsOn: ['selling_models', 'products'],
       columns: [
-        { name: 'Product_Code', type: 'reference', required: true, referenceTo: 'products' },
-        { name: 'Attribute_API_Name', type: 'reference', required: true, referenceTo: 'attributes' },
-        { name: 'Required', type: 'boolean', required: false },
-        { name: 'Display_Order', type: 'number', required: false },
-        { name: 'Default_Value', type: 'string', required: false },
+        { name: 'ProductSellingModelId', type: 'reference', required: true, sfField: 'ProductSellingModelId', referenceTo: 'selling_models', referenceDisplayField: 'Name' },
+        { name: 'Product2Id', type: 'reference', required: true, sfField: 'Product2Id', referenceTo: 'products', referenceDisplayField: 'Name' },
+        { name: 'IsDefault', type: 'boolean', required: false, sfField: 'IsDefault', defaultValue: false },
       ],
       parentIdMappings: [
         {
-          field: 'Product_Code',
-          parentStep: 'products',
-          parentField: 'Product_Code',
+          field: 'ProductSellingModelId',
+          parentStep: 'selling_models',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
         {
-          field: 'Attribute_API_Name',
-          parentStep: 'attributes',
-          parentField: 'Attribute_API_Name',
+          field: 'Product2Id',
+          parentStep: 'products',
+          parentField: 'Name',
+          parentIdField: 'id',
         },
       ],
     },
@@ -321,6 +423,25 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
+
+/**
+ * Existing ID References Configuration
+ * These are Salesforce IDs that exist in the org and can be referenced during deployment
+ */
+export interface ExistingIdReference {
+  id: string;
+  name: string;
+  objectType: string;
+  salesforceId: string;
+  description?: string;
+}
+
+export interface ExistingIdsConfig {
+  catalogs: ExistingIdReference[];
+  pricebooks: ExistingIdReference[];
+  sellingModels: ExistingIdReference[];
+  classifications: ExistingIdReference[];
+}
 
 /**
  * Validate pipeline configuration
@@ -414,115 +535,58 @@ export function getExecutionOrder(config: PipelineConfig): PipelineStep[] {
 }
 
 /**
- * Field mapping configurations for each step
- * Maps Excel column names to Salesforce API field names
+ * Get steps grouped by category for UI display
  */
-const FIELD_MAPPINGS: Record<string, Record<string, string>> = {
-  picklists: {
-    Picklist_Name: 'Name',
-    Picklist_API_Name: 'REVVY__API_Name__c',
-    Active: 'REVVY__Active__c',
-  },
-  picklist_values: {
-    Picklist_Name: 'REVVY__Picklist__c',
-    Value_Label: 'Name',
-    Value_API_Name: 'REVVY__API_Name__c',
-    Display_Order: 'REVVY__Display_Order__c',
-    Active: 'REVVY__Active__c',
-    Is_Default: 'REVVY__Is_Default__c',
-  },
-  categories: {
-    Category_Name: 'Name',
-    Category_Code: 'REVVY__Category_Code__c',
-    Parent_Category_Code: 'REVVY__Parent_Category__c',
-    Sequence: 'REVVY__Sequence__c',
-    Active: 'REVVY__Active__c',
-    Description: 'REVVY__Description__c',
-  },
-  attributes: {
-    Attribute_Name: 'Name',
-    Attribute_API_Name: 'REVVY__API_Name__c',
-    Data_Type: 'REVVY__Data_Type__c',
-    Display_Type: 'REVVY__Display_Type__c',
-    Picklist_Name: 'REVVY__Picklist__c',
-    Sequence: 'REVVY__Sequence__c',
-    Required: 'REVVY__Required__c',
-    Default_Value: 'REVVY__Default_Value__c',
-    Help_Text: 'REVVY__Help_Text__c',
-    Min_Value: 'REVVY__Min_Value__c',
-    Max_Value: 'REVVY__Max_Value__c',
-    Max_Length: 'REVVY__Max_Length__c',
-  },
-  products: {
-    Product_Code: 'ProductCode',
-    Product_Name: 'Name',
-    Product_Type: 'REVVY__Product_Type__c',
-    Description: 'Description',
-    Product_Family: 'Family',
-    Active: 'IsActive',
-    Pricing_Method: 'REVVY__Pricing_Method__c',
-    Revenue_Recognition_Rule: 'REVVY__Revenue_Recognition_Rule__c',
-    Tax_Treatment: 'REVVY__Tax_Treatment__c',
-    Parent_Product_Code: 'REVVY__Parent_Product__c',
-    Category_Code: 'REVVY__Category__c',
-  },
-  product_relationships: {
-    Parent_Product_Code: 'REVVY__Parent_Product__c',
-    Child_Product_Code: 'REVVY__Child_Product__c',
-    Relationship_Type: 'REVVY__Relationship_Type__c',
-    Required: 'REVVY__Required__c',
-    Min_Quantity: 'REVVY__Min_Quantity__c',
-    Max_Quantity: 'REVVY__Max_Quantity__c',
-    Default_Quantity: 'REVVY__Default_Quantity__c',
-  },
-  catalogs: {
-    Catalog_Name: 'Name',
-    Catalog_Code: 'REVVY__Catalog_Code__c',
-    Active: 'REVVY__Active__c',
-    Start_Date: 'REVVY__Start_Date__c',
-    End_Date: 'REVVY__End_Date__c',
-    Description: 'REVVY__Description__c',
-  },
-  catalog_products: {
-    Catalog_Code: 'REVVY__Catalog__c',
-    Product_Code: 'REVVY__Product__c',
-    Sequence: 'REVVY__Sequence__c',
-  },
-  pricebooks: {
-    PriceBook_Name: 'Name',
-    PriceBook_Code: 'REVVY__PriceBook_Code__c',
-    Currency: 'CurrencyIsoCode',
-    Active: 'IsActive',
-    Description: 'Description',
-  },
-  price_list_items: {
-    PriceBook_Code: 'Pricebook2Id',
-    Product_Code: 'Product2Id',
-    List_Price: 'UnitPrice',
-    Effective_Date: 'REVVY__Effective_Date__c',
-    Expiration_Date: 'REVVY__Expiration_Date__c',
-    Discount_Schedule: 'REVVY__Discount_Schedule__c',
-  },
-  selling_models: {
-    Selling_Model_Name: 'Name',
-    Selling_Model_Code: 'REVVY__Selling_Model_Code__c',
-    Selling_Term_Type: 'REVVY__Selling_Term_Type__c',
-    Billing_Frequency: 'REVVY__Billing_Frequency__c',
-    Revenue_Recognition_Method: 'REVVY__Revenue_Recognition_Method__c',
-    Product_Code: 'REVVY__Product__c',
-  },
-  attribute_mappings: {
-    Product_Code: 'REVVY__Product__c',
-    Attribute_API_Name: 'REVVY__Attribute__c',
-    Required: 'REVVY__Required__c',
-    Display_Order: 'REVVY__Display_Order__c',
-    Default_Value: 'REVVY__Default_Value__c',
-  },
-};
+export function getStepsByCategory(config: PipelineConfig): Record<string, PipelineStep[]> {
+  return {
+    'Attribute Management': config.steps.filter(s =>
+      ['picklists', 'picklist_values', 'attributes'].includes(s.id)
+    ),
+    'Product Classification': config.steps.filter(s =>
+      ['classifications', 'classification_attributes'].includes(s.id)
+    ),
+    'Product Catalog': config.steps.filter(s =>
+      ['catalogs', 'categories', 'category_products'].includes(s.id)
+    ),
+    'Products': config.steps.filter(s =>
+      ['products', 'product_classifications'].includes(s.id)
+    ),
+    'Pricing': config.steps.filter(s =>
+      ['pricebooks', 'pricebook_entries'].includes(s.id)
+    ),
+    'Selling Models': config.steps.filter(s =>
+      ['selling_models', 'selling_model_options'].includes(s.id)
+    ),
+  };
+}
 
 /**
- * Get field mapping for a pipeline step
+ * Get step by ID
+ */
+export function getStepById(config: PipelineConfig, stepId: string): PipelineStep | undefined {
+  return config.steps.find(s => s.id === stepId);
+}
+
+/**
+ * Get all steps that depend on a given step
+ */
+export function getDependentSteps(config: PipelineConfig, stepId: string): PipelineStep[] {
+  return config.steps.filter(s => s.dependsOn.includes(stepId));
+}
+
+/**
+ * Field mapping configurations for each step
+ * Maps input field names to Salesforce API field names
  */
 export function getFieldMapping(stepId: string): Record<string, string> {
-  return FIELD_MAPPINGS[stepId] || {};
+  const step = DEFAULT_PIPELINE_CONFIG.steps.find(s => s.id === stepId);
+  if (!step) return {};
+
+  const mapping: Record<string, string> = {};
+  for (const col of step.columns) {
+    if (col.sfField) {
+      mapping[col.name] = col.sfField;
+    }
+  }
+  return mapping;
 }
