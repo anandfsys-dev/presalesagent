@@ -51,7 +51,7 @@ function getEntrySubtitle(entry: DataEntry): string | null {
 }
 
 interface HierarchicalDataEntryProps {
-  connectionId?: string;
+  connectionId?: string; // Optional - used for Salesforce ID picker
 }
 
 // Step Navigator - Left panel showing all steps

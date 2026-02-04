@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import React, { useState, useRef, Suspense, lazy } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import {
   Card,
   CardHeader,
@@ -11,11 +10,9 @@ import {
   Button,
   Alert,
   Badge,
-  Select,
 } from '@/components/ui';
 import { useConfigData, ExportData } from '@/contexts/ConfigDataContext';
 import HierarchicalDataEntry from '@/components/data-entry/HierarchicalDataEntry';
-import type { SalesforceConnection } from '@/types';
 
 // Lazy load the Visual Data Builder to avoid SSR issues with React Flow
 const VisualDataBuilder = lazy(() => import('@/components/data-entry/VisualDataBuilder'));
@@ -25,7 +22,6 @@ type ViewMode = 'hierarchical' | 'visual';
 // Main Data Entry Content
 export default function DataEntryPage() {
   const router = useRouter();
-  const supabase = createClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     state,
@@ -37,39 +33,13 @@ export default function DataEntryPage() {
     isHydrated,
   } = useConfigData();
 
-  const [connections, setConnections] = useState<SalesforceConnection[]>([]);
-  const [selectedConnection, setSelectedConnection] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('hierarchical');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Fetch connections
-  useEffect(() => {
-    const fetchConnections = async () => {
-      const { data } = await supabase
-        .from('connections')
-        .select('*')
-        .eq('status', 'active')
-        .order('is_default', { ascending: false });
-
-      if (data) {
-        setConnections(data);
-        const defaultConn = data.find((c) => c.is_default);
-        if (defaultConn) {
-          setSelectedConnection(defaultConn.id);
-        } else if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        }
-      }
-    };
-
-    fetchConnections();
-  }, [supabase]);
-
   const totalEntries = getTotalEntryCount();
 
   const handleDeploy = () => {
-    if (!selectedConnection) return;
     router.push('/dashboard/deployment');
   };
 
@@ -160,7 +130,7 @@ export default function DataEntryPage() {
         className="hidden"
       />
 
-      {/* Header */}
+      {/* Header with Controls */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Data Entry</h1>
@@ -168,10 +138,47 @@ export default function DataEntryPage() {
             Configure Salesforce Revenue Cloud objects with automatic relationship mapping
           </p>
         </div>
-        <Badge variant={totalEntries > 0 ? 'success' : 'default'}>
-          {totalEntries} total entries
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Badge variant={totalEntries > 0 ? 'success' : 'default'}>
+            {totalEntries} total entries
+          </Badge>
+        </div>
       </div>
+
+      {/* Controls - Common for both tabs */}
+      <div className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleImportJSON}>
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Import JSON
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExportJSON} disabled={totalEntries === 0}>
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Export JSON
+          </Button>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleClear} disabled={totalEntries === 0}>
+            Clear All
+          </Button>
+          <Button size="sm" onClick={handleDeploy} disabled={totalEntries === 0}>
+            Proceed to Deployment ({totalEntries})
+          </Button>
+        </div>
+      </div>
+
+      {statusMessage && (
+        <Alert
+          variant={statusMessage.type === 'error' ? 'error' : 'success'}
+          onClose={() => setStatusMessage(null)}
+        >
+          {statusMessage.message}
+        </Alert>
+      )}
 
       {/* View Mode Tabs */}
       <div className="border-b border-gray-200">
@@ -209,74 +216,9 @@ export default function DataEntryPage() {
         </nav>
       </div>
 
-      {statusMessage && (
-        <Alert
-          variant={statusMessage.type === 'error' ? 'error' : 'success'}
-          onClose={() => setStatusMessage(null)}
-        >
-          {statusMessage.message}
-        </Alert>
-      )}
-
-      {/* Connection Selector */}
-      <Card>
-        <CardContent className="py-4">
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <Select
-                label="Target Salesforce Connection"
-                value={selectedConnection}
-                onChange={(e) => setSelectedConnection(e.target.value)}
-                options={[
-                  { value: '', label: 'Select a connection...' },
-                  ...connections.map((c) => ({
-                    value: c.id,
-                    label: `${c.name} (${c.instance_url})`,
-                  })),
-                ]}
-              />
-            </div>
-            {connections.length === 0 && (
-              <Button
-                variant="outline"
-                onClick={() => router.push('/dashboard/connections')}
-              >
-                Add Connection
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleImportJSON}>
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            Import JSON
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExportJSON} disabled={totalEntries === 0}>
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export JSON
-          </Button>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleClear} disabled={totalEntries === 0}>
-            Clear All
-          </Button>
-          <Button onClick={handleDeploy} disabled={totalEntries === 0 || !selectedConnection}>
-            Proceed to Deployment ({totalEntries})
-          </Button>
-        </div>
-      </div>
-
       {/* Hierarchical View */}
       {viewMode === 'hierarchical' && (
-        <HierarchicalDataEntry connectionId={selectedConnection} />
+        <HierarchicalDataEntry />
       )}
 
       {/* Visual Builder View */}
@@ -307,7 +249,6 @@ export default function DataEntryPage() {
                 <VisualDataBuilder
                   isFullscreen={isFullscreen}
                   onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
-                  connectionId={selectedConnection}
                 />
               </Suspense>
             </CardContent>
@@ -338,7 +279,7 @@ export default function DataEntryPage() {
                       )}
                     </div>
                   </div>
-                  <Button onClick={handleDeploy} disabled={!selectedConnection}>
+                  <Button onClick={handleDeploy} disabled={totalEntries === 0}>
                     Deploy to Salesforce
                   </Button>
                 </div>
