@@ -334,6 +334,7 @@ export default function DataEntryPage() {
   const [selectedConnection, setSelectedConnection] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('hierarchical');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Fetch connections
   useEffect(() => {
@@ -662,7 +663,10 @@ export default function DataEntryPage() {
                   </div>
                 </div>
               }>
-                <VisualDataBuilder />
+                <VisualDataBuilder
+                  isFullscreen={isFullscreen}
+                  onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+                />
               </Suspense>
             </CardContent>
           </Card>

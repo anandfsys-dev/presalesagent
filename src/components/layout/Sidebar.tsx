@@ -81,8 +81,8 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 min-h-[calc(100vh-4rem)] hidden lg:block">
-      <nav className="p-4 space-y-1">
+    <aside className="w-64 bg-white border-r border-gray-200 hidden lg:flex lg:flex-col flex-shrink-0">
+      <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
 
@@ -106,7 +106,7 @@ export function Sidebar() {
       </nav>
 
       {/* Bottom section */}
-      <div className="absolute bottom-0 left-0 w-64 p-4 border-t border-gray-200 bg-white">
+      <div className="p-4 border-t border-gray-200 bg-white flex-shrink-0">
         <div className="text-xs text-gray-500">
           <p>Salesforce RCA Config Tool</p>
           <p className="mt-1">Version 1.0.0</p>

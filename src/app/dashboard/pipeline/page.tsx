@@ -326,6 +326,7 @@ export default function PipelinePage() {
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('editor');
   const [changedSteps, setChangedSteps] = useState<string[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Load saved config from Supabase
   useEffect(() => {
@@ -543,21 +544,6 @@ export default function PipelinePage() {
             </div>
           </button>
           <button
-            onClick={() => setActiveTab('summary')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'summary'
-                ? 'border-black text-black'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Configuration Summary
-            </div>
-          </button>
-          <button
             onClick={() => setActiveTab('postDeployment')}
             className={`py-4 px-1 border-b-2 font-medium text-sm ${
               activeTab === 'postDeployment'
@@ -570,6 +556,21 @@ export default function PipelinePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               Post Deployment
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('summary')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'summary'
+                ? 'border-black text-black'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Configuration Summary
             </div>
           </button>
         </nav>
@@ -616,6 +617,8 @@ export default function PipelinePage() {
                 initialConfig={config}
                 onSave={handleSave}
                 onGenerateCSV={handleGenerateCSV}
+                isFullscreen={isFullscreen}
+                onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
               />
             </CardContent>
           </Card>
@@ -735,6 +738,44 @@ export default function PipelinePage() {
               </tbody>
             </table>
           </div>
+
+          {/* Post Deployment Operations Summary */}
+          {(config.postDeploymentOperations?.length ?? 0) > 0 && (
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h3 className="text-sm font-medium text-gray-900 mb-3 flex items-center gap-2">
+                <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Post Deployment Operations ({config.postDeploymentOperations?.length || 0})
+              </h3>
+              <p className="text-xs text-gray-500 mb-3">These operations will execute after all objects are deployed.</p>
+              <div className="space-y-2">
+                {config.postDeploymentOperations?.map((op, index) => (
+                  <div key={op.id} className="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                    <span className="w-6 h-6 flex items-center justify-center bg-purple-600 text-white text-xs font-medium rounded-full">
+                      {index + 1}
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                      op.type === 'wait' ? 'bg-gray-200 text-gray-700' :
+                      op.type === 'GET' ? 'bg-blue-100 text-blue-800' :
+                      'bg-green-100 text-green-800'
+                    }`}>
+                      {op.type}
+                    </span>
+                    <span className="text-sm font-medium text-gray-900">{op.name}</span>
+                    {op.type === 'wait' && (
+                      <span className="text-xs text-gray-500">{op.waitTimeSeconds}s delay</span>
+                    )}
+                    {op.endpoint && (
+                      <code className="text-xs bg-white/70 px-2 py-0.5 rounded text-gray-600 truncate max-w-xs">
+                        {op.endpoint}
+                      </code>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
       )}

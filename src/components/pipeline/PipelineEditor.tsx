@@ -28,6 +28,8 @@ interface PipelineEditorProps {
   onSave: (config: PipelineConfig) => void;
   onGenerateCSV: (config: PipelineConfig) => void;
   onConfigChange?: (config: PipelineConfig) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 const nodeTypes = {
@@ -123,7 +125,7 @@ function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConf
   };
 }
 
-export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigChange }: PipelineEditorProps) {
+export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigChange, isFullscreen, onToggleFullscreen }: PipelineEditorProps) {
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
     () => configToFlow(initialConfig),
     [initialConfig]
@@ -281,7 +283,11 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigC
   }, [nodes, edges, initialConfig]);
 
   return (
-    <div className="h-[700px] w-full border border-gray-200 rounded-lg overflow-hidden bg-white">
+    <div className={`w-full border border-gray-200 rounded-lg overflow-hidden bg-white ${
+      isFullscreen
+        ? 'fixed inset-0 z-50 rounded-none'
+        : 'h-[700px]'
+    }`}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -313,6 +319,19 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigC
             </svg>
             Add Object
           </Button>
+          {onToggleFullscreen && (
+            <Button onClick={onToggleFullscreen} variant="outline" size="sm" title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+              {isFullscreen ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+              )}
+            </Button>
+          )}
         </Panel>
 
         <Panel position="top-right" className="flex items-center gap-2">
