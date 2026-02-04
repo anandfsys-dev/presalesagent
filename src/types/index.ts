@@ -75,8 +75,22 @@ export interface PipelineConfig {
   description: string;
   version: string;
   steps: PipelineStep[];
+  postDeploymentOperations?: PostDeploymentOperation[];
   created_at: string;
   updated_at: string;
+}
+
+// Post Deployment Operations
+export interface PostDeploymentOperation {
+  id: string;
+  name: string;
+  type: 'wait' | 'GET' | 'POST';
+  order: number;
+  // For wait type
+  waitTimeSeconds?: number;
+  // For GET/POST types
+  endpoint?: string;
+  payload?: Record<string, unknown>;
 }
 
 // Excel Template Types
