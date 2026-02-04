@@ -669,8 +669,8 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen }: VisualData
 
   return (
     <div
-      className={`relative w-full bg-gray-50 rounded-lg border border-gray-200 ${
-        isFullscreen ? 'fixed inset-0 z-50 rounded-none' : 'h-[700px]'
+      className={`w-full bg-gray-50 rounded-lg border border-gray-200 ${
+        isFullscreen ? 'fixed inset-0 z-50 rounded-none bg-white' : 'relative h-[700px]'
       }`}
       ref={reactFlowWrapper}
     >
