@@ -182,36 +182,63 @@ export default function DeploymentPage() {
         throw new Error('No response stream available');
       }
 
+      // Buffer for incomplete lines across chunks
+      let buffer = '';
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          // Process any remaining buffer content
+          if (buffer.trim()) {
+            try {
+              const event = JSON.parse(buffer);
+              processEvent(event);
+            } catch {
+              // Ignore incomplete final chunk
+            }
+          }
+          break;
+        }
 
-        const text = decoder.decode(value);
-        const lines = text.split('\n').filter((line) => line.trim());
+        // Decode with stream option for proper handling of partial UTF-8
+        buffer += decoder.decode(value, { stream: true });
+
+        // Split on newlines and process complete lines
+        const lines = buffer.split('\n');
+
+        // Keep the last potentially incomplete line in the buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
+          if (!line.trim()) continue;
           try {
             const event = JSON.parse(line);
-
-            if (event.type === 'progress') {
-              setProgress(event.data);
-            } else if (event.type === 'log') {
-              addLog(event.data.level, event.data.message, event.data.salesforceId, event.data.objectType);
-            } else if (event.type === 'record_created') {
-              setCreatedRecords(prev => [...prev, event.data]);
-              addLog('success', `Created ${event.data.objectType}: ${event.data.name}`, event.data.salesforceId, event.data.objectType);
-            } else if (event.type === 'post_deployment_result') {
-              setPostDeploymentResults(prev => [...prev, event.data]);
-            } else if (event.type === 'complete') {
-              setResult(event.data);
-              setDeploymentComplete(true);
-            } else if (event.type === 'error') {
-              setError(event.data.message);
-              addLog('error', event.data.message);
-            }
+            processEvent(event);
           } catch {
-            // Ignore parse errors for incomplete chunks
+            // Ignore parse errors for malformed chunks
           }
+        }
+      }
+
+      function processEvent(event: { type: string; data: unknown }) {
+        if (event.type === 'progress') {
+          setProgress(event.data as DeploymentProgress);
+        } else if (event.type === 'log') {
+          const logData = event.data as { level: DeploymentLog['level']; message: string; salesforceId?: string; objectType?: string };
+          addLog(logData.level, logData.message, logData.salesforceId, logData.objectType);
+        } else if (event.type === 'record_created') {
+          const recordData = event.data as CreatedRecord;
+          setCreatedRecords(prev => [...prev, recordData]);
+          addLog('success', `Created ${recordData.objectType}: ${recordData.name}`, recordData.salesforceId, recordData.objectType);
+        } else if (event.type === 'post_deployment_result') {
+          setPostDeploymentResults(prev => [...prev, event.data as PostDeploymentResult]);
+        } else if (event.type === 'complete') {
+          setResult(event.data as typeof result);
+          setDeploymentComplete(true);
+        } else if (event.type === 'error') {
+          const errorData = event.data as { message: string };
+          setError(errorData.message);
+          addLog('error', errorData.message);
         }
       }
     } catch (err) {
