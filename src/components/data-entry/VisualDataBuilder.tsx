@@ -350,7 +350,7 @@ function Sidebar({ onDragStart, isFullscreen }: { onDragStart: (event: React.Dra
   const { pipelineConfig, stepsByCategory, getEntryCountByStep } = useConfigData();
 
   return (
-    <div className={`absolute left-4 ${isFullscreen ? 'top-16' : 'top-4'} bottom-4 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-40 flex flex-col`}>
+    <div className={`absolute left-4 ${isFullscreen ? 'top-20' : 'top-16'} bottom-4 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-40 flex flex-col`}>
       <div className="px-4 py-3 border-b border-gray-200">
         <h3 className="font-semibold text-gray-900 text-sm">Object Types</h3>
         <p className="text-xs text-gray-500 mt-1">Drag to add to canvas</p>
@@ -692,34 +692,6 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen }: VisualData
         <Background color="#e5e7eb" gap={16} />
         <Controls />
 
-        {/* Fullscreen Toggle */}
-        {onToggleFullscreen && (
-          <Panel position="top-left" className="m-4">
-            <Button
-              onClick={onToggleFullscreen}
-              variant="outline"
-              size="sm"
-              title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-            >
-              {isFullscreen ? (
-                <>
-                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  Exit Fullscreen
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                  </svg>
-                  Fullscreen
-                </>
-              )}
-            </Button>
-          </Panel>
-        )}
-
         {/* Legend Panel */}
         <Panel position="top-right" className="bg-white/90 rounded-lg p-3 shadow-sm border border-gray-200 m-4">
           <h4 className="text-xs font-semibold text-gray-600 mb-2">Legend</h4>
@@ -735,6 +707,35 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen }: VisualData
           </div>
         </Panel>
       </ReactFlow>
+
+      {/* Fullscreen Toggle - positioned above sidebar */}
+      {onToggleFullscreen && (
+        <div className="absolute top-4 left-4 z-50">
+          <Button
+            onClick={onToggleFullscreen}
+            variant="outline"
+            size="sm"
+            title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            className="bg-white shadow-md"
+          >
+            {isFullscreen ? (
+              <>
+                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Exit Fullscreen
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+                Fullscreen
+              </>
+            )}
+          </Button>
+        </div>
+      )}
 
       {/* Sidebar */}
       <Sidebar onDragStart={onDragStart} isFullscreen={isFullscreen} />
