@@ -538,7 +538,17 @@ export function getExecutionOrder(config: PipelineConfig): PipelineStep[] {
  * Get steps grouped by category for UI display
  */
 export function getStepsByCategory(config: PipelineConfig): Record<string, PipelineStep[]> {
-  return {
+  // Known step IDs for predefined categories
+  const knownStepIds = new Set([
+    'picklists', 'picklist_values', 'attributes',
+    'classifications', 'classification_attributes',
+    'catalogs', 'categories', 'category_products',
+    'products', 'product_classifications',
+    'pricebooks', 'pricebook_entries',
+    'selling_models', 'selling_model_options',
+  ]);
+
+  const categories: Record<string, PipelineStep[]> = {
     'Attribute Management': config.steps.filter(s =>
       ['picklists', 'picklist_values', 'attributes'].includes(s.id)
     ),
@@ -558,6 +568,17 @@ export function getStepsByCategory(config: PipelineConfig): Record<string, Pipel
       ['selling_models', 'selling_model_options'].includes(s.id)
     ),
   };
+
+  // Add any custom steps that don't fit in predefined categories
+  const customSteps = config.steps.filter(s => !knownStepIds.has(s.id));
+  if (customSteps.length > 0) {
+    categories['Custom Objects'] = customSteps;
+  }
+
+  // Filter out empty categories
+  return Object.fromEntries(
+    Object.entries(categories).filter(([, steps]) => steps.length > 0)
+  );
 }
 
 /**
