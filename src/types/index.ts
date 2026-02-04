@@ -56,10 +56,13 @@ export interface ColumnDefinition {
   required: boolean;
   description?: string;
   defaultValue?: string | number | boolean;
-  referenceTo?: string; // For reference types, which object it references
+  referenceTo?: string; // For reference types, which object it references (internal step ID)
   referenceDisplayField?: string; // Field to display for reference selection
   sfField?: string; // Salesforce API field name
   picklistValues?: string[]; // For picklist types, allowed values
+  // External Salesforce reference properties
+  referenceType?: 'internal' | 'external'; // 'internal' = pipeline step reference, 'external' = Salesforce record
+  externalSobject?: string; // For external references, the Salesforce object API name (e.g., 'Account', 'Product2')
 }
 
 export interface ParentIdMapping {

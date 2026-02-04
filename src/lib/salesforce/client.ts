@@ -241,6 +241,64 @@ export class SalesforceClient {
   async getLimits(): Promise<Record<string, { Max: number; Remaining: number }>> {
     return this.request(`/services/data/v${this.apiVersion}/limits`);
   }
+
+  /**
+   * Get all SObjects in the org
+   */
+  async getSObjects(): Promise<{ sobjects: Array<{ name: string; label: string; queryable: boolean; createable: boolean; custom: boolean }> }> {
+    return this.request(`/services/data/v${this.apiVersion}/sobjects/`);
+  }
+
+  /**
+   * Search records in an object using SOSL or SOQL
+   * Returns Id and Name (or specified fields) for display in picker
+   */
+  async searchRecords(
+    objectType: string,
+    searchTerm?: string,
+    limit: number = 50,
+    nameField: string = 'Name'
+  ): Promise<{ records: Array<{ Id: string; Name: string; [key: string]: unknown }>; totalSize: number }> {
+    // Build SOQL query
+    let soql: string;
+
+    if (searchTerm && searchTerm.trim()) {
+      // Search with LIKE clause
+      const escapedTerm = searchTerm.replace(/'/g, "\\'");
+      soql = `SELECT Id, ${nameField} FROM ${objectType} WHERE ${nameField} LIKE '%${escapedTerm}%' ORDER BY ${nameField} ASC LIMIT ${limit}`;
+    } else {
+      // Return recent records
+      soql = `SELECT Id, ${nameField} FROM ${objectType} ORDER BY LastModifiedDate DESC LIMIT ${limit}`;
+    }
+
+    const result = await this.query<{ Id: string; [key: string]: unknown }>(soql);
+
+    // Map to consistent format
+    return {
+      records: result.records.map(r => {
+        const nameValue = r[nameField] as string || r.Id;
+        return {
+          ...r,
+          Id: r.Id,
+          Name: nameValue,
+        };
+      }),
+      totalSize: result.totalSize
+    };
+  }
+
+  /**
+   * Get the name field for an object (some objects use different fields)
+   */
+  async getNameField(objectType: string): Promise<string> {
+    try {
+      const describe = await this.describe(objectType) as { fields: Array<{ name: string; nameField: boolean }> };
+      const nameField = describe.fields.find(f => f.nameField);
+      return nameField?.name || 'Name';
+    } catch {
+      return 'Name';
+    }
+  }
 }
 
 /**

@@ -1,9 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Node } from '@xyflow/react';
 import { Button } from '@/components/ui';
-import type { PipelineStep } from '@/types';
+import { createClient } from '@/lib/supabase/client';
+import type { PipelineStep, SalesforceConnection, ColumnDefinition } from '@/types';
+
+interface SobjectOption {
+  name: string;
+  label: string;
+  custom: boolean;
+}
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -20,6 +27,7 @@ export function NodeConfigPanel({
   onDelete,
   onClose,
 }: NodeConfigPanelProps) {
+  const supabase = createClient();
   const [label, setLabel] = useState(node.data.label as string);
   const [apiName, setApiName] = useState(node.data.apiName as string);
   const [worksheetName, setWorksheetName] = useState(node.data.worksheetName as string);
@@ -30,6 +38,68 @@ export function NodeConfigPanel({
   );
   const [parentIdMappings, setParentIdMappings] = useState<PipelineStep['parentIdMappings']>(
     (node.data.parentIdMappings as PipelineStep['parentIdMappings']) || []
+  );
+
+  // State for external reference Salesforce objects
+  const [connections, setConnections] = useState<SalesforceConnection[]>([]);
+  const [selectedConnection, setSelectedConnection] = useState<string>('');
+  const [sobjects, setSobjects] = useState<SobjectOption[]>([]);
+  const [loadingSobjects, setLoadingSobjects] = useState(false);
+  const [sobjectSearch, setSobjectSearch] = useState('');
+  const [expandedColumnIndex, setExpandedColumnIndex] = useState<number | null>(null);
+
+  // Fetch connections on mount
+  useEffect(() => {
+    const fetchConnections = async () => {
+      const { data } = await supabase
+        .from('connections')
+        .select('*')
+        .eq('status', 'active')
+        .order('is_default', { ascending: false });
+
+      if (data) {
+        setConnections(data);
+        const defaultConn = data.find((c) => c.is_default);
+        if (defaultConn) {
+          setSelectedConnection(defaultConn.id);
+        } else if (data.length > 0) {
+          setSelectedConnection(data[0].id);
+        }
+      }
+    };
+
+    fetchConnections();
+  }, [supabase]);
+
+  // Fetch Salesforce objects when connection changes
+  const fetchSobjects = useCallback(async () => {
+    if (!selectedConnection) return;
+
+    setLoadingSobjects(true);
+    try {
+      const response = await fetch(`/api/salesforce/sobjects?connectionId=${selectedConnection}`);
+      const data = await response.json();
+      if (data.success) {
+        setSobjects(data.sobjects);
+      }
+    } catch (error) {
+      console.error('Failed to fetch SObjects:', error);
+    } finally {
+      setLoadingSobjects(false);
+    }
+  }, [selectedConnection]);
+
+  useEffect(() => {
+    if (selectedConnection) {
+      fetchSobjects();
+    }
+  }, [selectedConnection, fetchSobjects]);
+
+  // Filter sobjects based on search
+  const filteredSobjects = sobjects.filter(
+    (obj) =>
+      obj.label.toLowerCase().includes(sobjectSearch.toLowerCase()) ||
+      obj.name.toLowerCase().includes(sobjectSearch.toLowerCase())
   );
 
   // Reset form when node changes
@@ -68,14 +138,46 @@ export function NodeConfigPanel({
 
   const updateColumn = (index: number, field: string, value: string | boolean) => {
     setColumns(
-      columns.map((col, i) =>
-        i === index ? { ...col, [field]: value } : col
-      )
+      columns.map((col, i) => {
+        if (i !== index) return col;
+
+        const updatedCol = { ...col, [field]: value };
+
+        // When type changes to reference, set default referenceType
+        if (field === 'type' && value === 'reference' && !updatedCol.referenceType) {
+          updatedCol.referenceType = 'internal';
+        }
+
+        // Clear reference fields when type changes away from reference
+        if (field === 'type' && value !== 'reference') {
+          delete updatedCol.referenceType;
+          delete updatedCol.referenceTo;
+          delete updatedCol.externalSobject;
+        }
+
+        // When referenceType changes, clear the opposite fields
+        if (field === 'referenceType') {
+          if (value === 'internal') {
+            delete updatedCol.externalSobject;
+          } else if (value === 'external') {
+            delete updatedCol.referenceTo;
+          }
+        }
+
+        return updatedCol;
+      })
     );
   };
 
   const removeColumn = (index: number) => {
     setColumns(columns.filter((_, i) => i !== index));
+    if (expandedColumnIndex === index) {
+      setExpandedColumnIndex(null);
+    }
+  };
+
+  const toggleColumnExpand = (index: number) => {
+    setExpandedColumnIndex(expandedColumnIndex === index ? null : index);
   };
 
   const addMapping = () => {
@@ -199,46 +301,184 @@ export function NodeConfigPanel({
               + Add Column
             </button>
           </div>
-          <div className="space-y-2 max-h-48 overflow-y-auto">
+          <div className="space-y-2 max-h-64 overflow-y-auto">
             {columns.map((col, index) => (
-              <div key={index} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
-                <input
-                  type="text"
-                  value={col.name}
-                  onChange={(e) => updateColumn(index, 'name', e.target.value)}
-                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
-                  placeholder="Field name"
-                />
-                <select
-                  value={col.type}
-                  onChange={(e) => updateColumn(index, 'type', e.target.value)}
-                  className="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
-                >
-                  <option value="string">String</option>
-                  <option value="number">Number</option>
-                  <option value="boolean">Boolean</option>
-                  <option value="date">Date</option>
-                  <option value="currency">Currency</option>
-                  <option value="picklist">Picklist</option>
-                  <option value="reference">Reference</option>
-                </select>
-                <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+              <div key={index} className="p-2 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-2">
                   <input
-                    type="checkbox"
-                    checked={col.required}
-                    onChange={(e) => updateColumn(index, 'required', e.target.checked)}
-                    className="rounded border-gray-300 text-black focus:ring-black"
+                    type="text"
+                    value={col.name}
+                    onChange={(e) => updateColumn(index, 'name', e.target.value)}
+                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
+                    placeholder="Field name"
                   />
-                  Req
-                </label>
-                <button
-                  onClick={() => removeColumn(index)}
-                  className="text-red-500 hover:text-red-700 p-1"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                  <select
+                    value={col.type}
+                    onChange={(e) => updateColumn(index, 'type', e.target.value)}
+                    className="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
+                  >
+                    <option value="string">String</option>
+                    <option value="number">Number</option>
+                    <option value="boolean">Boolean</option>
+                    <option value="date">Date</option>
+                    <option value="currency">Currency</option>
+                    <option value="picklist">Picklist</option>
+                    <option value="reference">Reference</option>
+                  </select>
+                  <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={col.required}
+                      onChange={(e) => updateColumn(index, 'required', e.target.checked)}
+                      className="rounded border-gray-300 text-black focus:ring-black"
+                    />
+                    Req
+                  </label>
+                  {col.type === 'reference' && (
+                    <button
+                      onClick={() => toggleColumnExpand(index)}
+                      className={`p-1 rounded ${expandedColumnIndex === index ? 'bg-blue-100 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                      title="Configure reference"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => removeColumn(index)}
+                    className="text-red-500 hover:text-red-700 p-1"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Expanded Reference Configuration */}
+                {col.type === 'reference' && expandedColumnIndex === index && (
+                  <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Reference Type</label>
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-1 text-xs">
+                          <input
+                            type="radio"
+                            name={`refType-${index}`}
+                            checked={col.referenceType !== 'external'}
+                            onChange={() => updateColumn(index, 'referenceType', 'internal')}
+                            className="text-black focus:ring-black"
+                          />
+                          Internal (Pipeline Step)
+                        </label>
+                        <label className="flex items-center gap-1 text-xs">
+                          <input
+                            type="radio"
+                            name={`refType-${index}`}
+                            checked={col.referenceType === 'external'}
+                            onChange={() => updateColumn(index, 'referenceType', 'external')}
+                            className="text-black focus:ring-black"
+                          />
+                          External (Salesforce Record)
+                        </label>
+                      </div>
+                    </div>
+
+                    {col.referenceType !== 'external' ? (
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">References Step</label>
+                        <select
+                          value={col.referenceTo || ''}
+                          onChange={(e) => updateColumn(index, 'referenceTo', e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
+                        >
+                          <option value="">Select step...</option>
+                          {otherNodes.map((n) => (
+                            <option key={n.id} value={n.id}>
+                              {n.data.label as string}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Select which pipeline step this field references
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Salesforce Object</label>
+                        {connections.length === 0 ? (
+                          <p className="text-xs text-amber-600">
+                            No Salesforce connections available. Add a connection first.
+                          </p>
+                        ) : (
+                          <>
+                            {connections.length > 1 && (
+                              <select
+                                value={selectedConnection}
+                                onChange={(e) => setSelectedConnection(e.target.value)}
+                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black mb-2"
+                              >
+                                {connections.map((conn) => (
+                                  <option key={conn.id} value={conn.id}>
+                                    {conn.name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={col.externalSobject || sobjectSearch}
+                                onChange={(e) => {
+                                  setSobjectSearch(e.target.value);
+                                  if (col.externalSobject) {
+                                    updateColumn(index, 'externalSobject', '');
+                                  }
+                                }}
+                                onFocus={() => setSobjectSearch('')}
+                                placeholder={loadingSobjects ? 'Loading objects...' : 'Search Salesforce objects...'}
+                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
+                                disabled={loadingSobjects}
+                              />
+                              {sobjectSearch && !col.externalSobject && filteredSobjects.length > 0 && (
+                                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                                  {filteredSobjects.slice(0, 20).map((obj) => (
+                                    <button
+                                      key={obj.name}
+                                      onClick={() => {
+                                        updateColumn(index, 'externalSobject', obj.name);
+                                        setSobjectSearch('');
+                                      }}
+                                      className="w-full px-3 py-2 text-left text-xs hover:bg-gray-50 flex items-center justify-between"
+                                    >
+                                      <span>{obj.label}</span>
+                                      <span className="text-gray-400">{obj.name}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            {col.externalSobject && (
+                              <div className="mt-1 flex items-center gap-2">
+                                <span className="text-xs text-green-600">Selected: {col.externalSobject}</span>
+                                <button
+                                  onClick={() => updateColumn(index, 'externalSobject', '')}
+                                  className="text-xs text-red-500 hover:text-red-700"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-400 mt-1">
+                              Users will be able to pick a record from this Salesforce object
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
             {columns.length === 0 && (

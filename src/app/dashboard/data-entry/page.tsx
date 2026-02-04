@@ -15,6 +15,7 @@ import {
   Input,
 } from '@/components/ui';
 import { useConfigData, DataEntry, ExportData } from '@/contexts/ConfigDataContext';
+import { SalesforceRecordPicker } from '@/components/data-entry/SalesforceRecordPicker';
 import type { SalesforceConnection, PipelineStep, ColumnDefinition } from '@/types';
 
 // Lazy load the Visual Data Builder to avoid SSR issues with React Flow
@@ -28,11 +29,13 @@ function EntryForm({
   onSubmit,
   onCancel,
   initialData,
+  connectionId,
 }: {
   step: PipelineStep;
   onSubmit: (data: Record<string, unknown>) => void;
   onCancel: () => void;
   initialData?: DataEntry;
+  connectionId?: string;
 }) {
   const { getReferenceOptions } = useConfigData();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => {
@@ -49,6 +52,11 @@ function EntryForm({
     return defaults;
   });
 
+  // State for external reference picker
+  const [pickerColumn, setPickerColumn] = useState<ColumnDefinition | null>(null);
+  // Store display names for external references
+  const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>({});
+
   const handleChange = (name: string, value: unknown) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -58,11 +66,63 @@ function EntryForm({
     onSubmit(formData);
   };
 
+  const handleExternalRefSelect = (colName: string, record: { id: string; name: string }) => {
+    handleChange(colName, record.id);
+    setExternalRefNames(prev => ({ ...prev, [colName]: record.name }));
+    setPickerColumn(null);
+  };
+
   const renderField = (col: ColumnDefinition) => {
     const value = formData[col.name];
 
     switch (col.type) {
       case 'reference':
+        // Check if this is an external reference
+        if (col.referenceType === 'external' && col.externalSobject) {
+          return (
+            <div key={col.name}>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {col.name.replace(/_/g, ' ')} {col.required && <span className="text-red-500">*</span>}
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  value={externalRefNames[col.name] || (value as string) || ''}
+                  onChange={(e) => {
+                    handleChange(col.name, e.target.value);
+                    // Clear the display name if user manually edits
+                    if (externalRefNames[col.name]) {
+                      setExternalRefNames(prev => {
+                        const newNames = { ...prev };
+                        delete newNames[col.name];
+                        return newNames;
+                      });
+                    }
+                  }}
+                  placeholder={`Enter ${col.externalSobject} ID or use Get button`}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPickerColumn(col)}
+                  disabled={!connectionId}
+                  title={!connectionId ? 'Select a Salesforce connection first' : `Select from ${col.externalSobject}`}
+                >
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  Get
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Lookup from: {col.externalSobject}
+              </p>
+            </div>
+          );
+        }
+
+        // Internal reference (existing behavior)
         const options = getReferenceOptions(step.id, col);
         return (
           <Select
@@ -138,24 +198,38 @@ function EntryForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {step.columns.map(renderField)}
-      </div>
-      <div className="flex justify-end gap-2 pt-4 border-t">
-        <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit">
-          {initialData ? 'Update' : 'Add'} {step.name.replace(/s$/, '')}
-        </Button>
-      </div>
-    </form>
+    <>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {step.columns.map(renderField)}
+        </div>
+        <div className="flex justify-end gap-2 pt-4 border-t">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit">
+            {initialData ? 'Update' : 'Add'} {step.name.replace(/s$/, '')}
+          </Button>
+        </div>
+      </form>
+
+      {/* Salesforce Record Picker Modal */}
+      {pickerColumn && connectionId && pickerColumn.externalSobject && (
+        <SalesforceRecordPicker
+          connectionId={connectionId}
+          sobjectName={pickerColumn.externalSobject}
+          sobjectLabel={pickerColumn.externalSobject}
+          onSelect={(record) => handleExternalRefSelect(pickerColumn.name, record)}
+          onClose={() => setPickerColumn(null)}
+          currentValue={formData[pickerColumn.name] as string}
+        />
+      )}
+    </>
   );
 }
 
 // Step Panel Component
-function StepPanel({ step, isHighlighted }: { step: PipelineStep; isHighlighted?: boolean }) {
+function StepPanel({ step, isHighlighted, connectionId }: { step: PipelineStep; isHighlighted?: boolean; connectionId?: string }) {
   const { state, addEntry, updateEntry, deleteEntry, getEntryCountByStep, getReferenceOptions } = useConfigData();
   const [isExpanded, setIsExpanded] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -256,6 +330,7 @@ function StepPanel({ step, isHighlighted }: { step: PipelineStep; isHighlighted?
                   setEditingEntry(null);
                 }}
                 initialData={editingEntry || undefined}
+                connectionId={connectionId}
               />
             </div>
           )}
@@ -593,6 +668,7 @@ export default function DataEntryPage() {
                     key={step.id}
                     step={step}
                     isHighlighted={recentlyChangedSteps.includes(step.id)}
+                    connectionId={selectedConnection}
                   />
                 ))}
               </div>
@@ -666,6 +742,7 @@ export default function DataEntryPage() {
                 <VisualDataBuilder
                   isFullscreen={isFullscreen}
                   onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+                  connectionId={selectedConnection}
                 />
               </Suspense>
             </CardContent>
