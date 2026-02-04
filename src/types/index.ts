@@ -61,6 +61,8 @@ export interface ColumnDefinition {
   sfField?: string; // Salesforce API field name
   picklistValues?: string[]; // For picklist types, allowed values
   externalSobject?: string; // For salesforce_id type, the Salesforce object API name (e.g., 'Account', 'Product2')
+  autogenerate?: boolean; // If true, auto-generate unique codes/SKUs for this field
+  isKey?: boolean; // If true, this field must be unique (Salesforce doesn't allow duplicates)
 }
 
 export interface ParentIdMapping {

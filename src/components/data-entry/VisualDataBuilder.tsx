@@ -25,6 +25,41 @@ import { Card, CardHeader, CardTitle, CardContent, Button, Input, Select, Badge 
 import { SalesforceRecordPicker } from './SalesforceRecordPicker';
 import type { PipelineStep, ColumnDefinition } from '@/types';
 
+// Generate unique code for autogenerate fields
+// Format: STEP-NAME-TIMESTAMP where STEP is abbreviation, NAME is initials, TIMESTAMP is base-26
+function generateUniqueCode(stepName: string, recordName?: string): string {
+  // Get abbreviation from step name (first letters of each word)
+  const stepAbbrev = stepName
+    .split(/[\s_-]+/)
+    .map(word => word.charAt(0).toUpperCase())
+    .join('')
+    .slice(0, 3);
+
+  // Get initials from record name if available
+  const nameInitials = recordName
+    ? recordName
+        .split(/[\s_-]+/)
+        .map(word => word.charAt(0).toUpperCase())
+        .join('')
+        .slice(0, 3)
+    : '';
+
+  // Generate base-26 timestamp (uses A-Z characters)
+  const timestamp = Date.now();
+  const base26Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let code = '';
+  let num = timestamp % (26 * 26 * 26 * 26);
+  for (let i = 0; i < 4; i++) {
+    code = base26Chars[num % 26] + code;
+    num = Math.floor(num / 26);
+  }
+
+  if (nameInitials) {
+    return `${stepAbbrev}-${nameInitials}-${code}`;
+  }
+  return `${stepAbbrev}-${code}`;
+}
+
 // Custom node data type
 interface EntryNodeData {
   entry: DataEntry;
@@ -208,17 +243,51 @@ function EditPanel({
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [pickerColumn, setPickerColumn] = useState<ColumnDefinition | null>(null);
   const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>({});
+  const [userModifiedFields, setUserModifiedFields] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (entry) {
-      setFormData({ ...entry });
+    if (entry && step) {
+      const data = { ...entry };
+      // For new entries (no Name set), populate autogenerate fields
+      const isNewEntry = !entry.Name && !entry.Code && !entry.Label;
+      if (isNewEntry) {
+        for (const col of step.columns) {
+          if (col.autogenerate && !data[col.name]) {
+            data[col.name] = generateUniqueCode(step.name);
+          }
+        }
+      }
+      setFormData(data);
+      setUserModifiedFields(new Set());
     }
-  }, [entry]);
+  }, [entry, step]);
 
   if (!entry || !step) return null;
 
   const handleChange = (name: string, value: unknown) => {
-    setFormData(prev => ({ ...prev, [name]: value }));
+    if (!step) return;
+
+    // Track if user manually modifies an autogenerate field
+    const col = step.columns.find(c => c.name === name);
+    if (col?.autogenerate) {
+      setUserModifiedFields(prev => new Set(prev).add(name));
+    }
+
+    setFormData(prev => {
+      const newData = { ...prev, [name]: value };
+
+      // If Name field changes and there are autogenerate fields that haven't been user-modified,
+      // update them with a new code incorporating the name
+      if (name === 'Name' && typeof value === 'string') {
+        for (const autoCol of step.columns) {
+          if (autoCol.autogenerate && !userModifiedFields.has(autoCol.name)) {
+            newData[autoCol.name] = generateUniqueCode(step.name, value);
+          }
+        }
+      }
+
+      return newData;
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -563,10 +632,13 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
     // Create initial data with reference to parent
     const initialData: Record<string, unknown> = {};
 
-    // Set default values
+    // Set default values and autogenerate values
     for (const col of childStep.columns) {
       if (col.defaultValue !== undefined) {
         initialData[col.name] = col.defaultValue;
+      }
+      if (col.autogenerate) {
+        initialData[col.name] = generateUniqueCode(childStep.name);
       }
     }
 
@@ -707,11 +779,14 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
       y: event.clientY,
     });
 
-    // Create initial entry with default values
+    // Create initial entry with default values and autogenerate values
     const initialData: Record<string, unknown> = {};
     for (const col of step.columns) {
       if (col.defaultValue !== undefined) {
         initialData[col.name] = col.defaultValue;
+      }
+      if (col.autogenerate) {
+        initialData[col.name] = generateUniqueCode(step.name);
       }
     }
 

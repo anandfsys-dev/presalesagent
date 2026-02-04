@@ -36,9 +36,7 @@ export function NodeConfigPanel({
   const [columns, setColumns] = useState<PipelineStep['columns']>(
     (node.data.columns as PipelineStep['columns']) || []
   );
-  const [parentIdMappings, setParentIdMappings] = useState<PipelineStep['parentIdMappings']>(
-    (node.data.parentIdMappings as PipelineStep['parentIdMappings']) || []
-  );
+  // parentIdMappings are now auto-generated from reference columns
 
   // State for external reference Salesforce objects
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
@@ -109,7 +107,6 @@ export function NodeConfigPanel({
     setEndpoint(node.data.endpoint as string || '');
     setMethod(node.data.method as string || 'POST');
     setColumns((node.data.columns as PipelineStep['columns']) || []);
-    setParentIdMappings((node.data.parentIdMappings as PipelineStep['parentIdMappings']) || []);
   }, [node]);
 
   // Auto-generate endpoint when apiName changes
@@ -120,6 +117,16 @@ export function NodeConfigPanel({
   }, [apiName, endpoint]);
 
   const handleSave = () => {
+    // Auto-generate parentIdMappings from reference columns
+    const generatedMappings = columns
+      .filter(col => col.type === 'reference' && col.referenceTo)
+      .map(col => ({
+        field: col.name,
+        parentStep: col.referenceTo!,
+        parentField: 'Name', // Default lookup key
+        parentIdField: 'id',
+      }));
+
     onUpdate(node.id, {
       label,
       apiName,
@@ -127,7 +134,7 @@ export function NodeConfigPanel({
       endpoint: endpoint || `/services/data/v60.0/sobjects/${apiName}/`,
       method,
       columns,
-      parentIdMappings,
+      parentIdMappings: generatedMappings,
     });
   };
 
@@ -161,26 +168,7 @@ export function NodeConfigPanel({
     setColumns(columns.filter((_, i) => i !== index));
   };
 
-  const addMapping = () => {
-    setParentIdMappings([
-      ...parentIdMappings,
-      { field: '', parentStep: '', parentField: 'Name', parentIdField: 'id' },
-    ]);
-  };
-
-  const updateMapping = (index: number, field: string, value: string) => {
-    setParentIdMappings(
-      parentIdMappings.map((mapping, i) =>
-        i === index ? { ...mapping, [field]: value } : mapping
-      )
-    );
-  };
-
-  const removeMapping = (index: number) => {
-    setParentIdMappings(parentIdMappings.filter((_, i) => i !== index));
-  };
-
-  // Get other nodes for parent mapping selection
+  // Get other nodes for reference selection
   const otherNodes = allNodes.filter((n) => n.id !== node.id);
 
   return (
@@ -307,15 +295,6 @@ export function NodeConfigPanel({
                     <option value="reference">Reference</option>
                     <option value="salesforce_id">Salesforce ID</option>
                   </select>
-                  <label className="flex items-center gap-1 text-xs whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      checked={col.required}
-                      onChange={(e) => updateColumn(index, 'required', e.target.checked)}
-                      className="rounded border-gray-300 text-black focus:ring-black"
-                    />
-                    Req
-                  </label>
                   <button
                     onClick={() => removeColumn(index)}
                     className="text-red-500 hover:text-red-700 p-1"
@@ -324,6 +303,37 @@ export function NodeConfigPanel({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
+                </div>
+
+                {/* Field properties row */}
+                <div className="flex items-center gap-4 mt-2 pt-2 border-t border-gray-200">
+                  <label className="flex items-center gap-1 text-xs whitespace-nowrap" title="Field is required">
+                    <input
+                      type="checkbox"
+                      checked={col.required}
+                      onChange={(e) => updateColumn(index, 'required', e.target.checked)}
+                      className="rounded border-gray-300 text-black focus:ring-black"
+                    />
+                    Required
+                  </label>
+                  <label className="flex items-center gap-1 text-xs whitespace-nowrap" title="Auto-generate unique codes/SKUs">
+                    <input
+                      type="checkbox"
+                      checked={col.autogenerate || false}
+                      onChange={(e) => updateColumn(index, 'autogenerate', e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Autogenerate
+                  </label>
+                  <label className="flex items-center gap-1 text-xs whitespace-nowrap" title="Unique field (no duplicates allowed in Salesforce)">
+                    <input
+                      type="checkbox"
+                      checked={col.isKey || false}
+                      onChange={(e) => updateColumn(index, 'isKey', e.target.checked)}
+                      className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    Key
+                  </label>
                 </div>
 
                 {/* Reference Configuration - for internal pipeline references */}
@@ -427,90 +437,6 @@ export function NodeConfigPanel({
             {columns.length === 0 && (
               <p className="text-xs text-gray-400 text-center py-4">
                 No columns defined. Click &quot;+ Add Column&quot; to add.
-              </p>
-            )}
-          </div>
-        </section>
-
-        {/* Parent ID Mappings (Dependencies) */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-sm font-medium text-gray-700">ID Mappings (References)</h4>
-            <button
-              onClick={addMapping}
-              className="text-xs text-gray-600 hover:text-black"
-            >
-              + Add Mapping
-            </button>
-          </div>
-          <p className="text-xs text-gray-500 mb-3">
-            Define how fields in this object reference IDs from parent objects.
-            Adding a mapping will create a dependency arrow automatically.
-          </p>
-          <div className="space-y-3">
-            {parentIdMappings.map((mapping, index) => (
-              <div key={index} className="p-3 bg-gray-50 rounded-lg space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-700">Mapping {index + 1}</span>
-                  <button
-                    onClick={() => removeMapping(index)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">This Field</label>
-                    <select
-                      value={mapping.field}
-                      onChange={(e) => updateMapping(index, 'field', e.target.value)}
-                      className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
-                    >
-                      <option value="">Select field...</option>
-                      {columns.map((col) => (
-                        <option key={col.name} value={col.name}>
-                          {col.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">References Object</label>
-                    <select
-                      value={mapping.parentStep}
-                      onChange={(e) => updateMapping(index, 'parentStep', e.target.value)}
-                      className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
-                    >
-                      <option value="">Select object...</option>
-                      {otherNodes.map((n) => (
-                        <option key={n.id} value={n.id}>
-                          {n.data.label as string}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Match By Field (lookup key)</label>
-                  <input
-                    type="text"
-                    value={mapping.parentField}
-                    onChange={(e) => updateMapping(index, 'parentField', e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
-                    placeholder="e.g., Name or Code"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">
-                    Field used to look up the parent record (usually Name or Code)
-                  </p>
-                </div>
-              </div>
-            ))}
-            {parentIdMappings.length === 0 && (
-              <p className="text-xs text-gray-400 text-center py-4">
-                No ID mappings defined. Add mappings to define how this object references parent objects.
               </p>
             )}
           </div>

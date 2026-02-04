@@ -23,6 +23,43 @@ const VisualDataBuilder = lazy(() => import('@/components/data-entry/VisualDataB
 
 type ViewMode = 'hierarchical' | 'visual';
 
+// Generate unique code for autogenerate fields
+// Format: STEP-NAME-TIMESTAMP where STEP is abbreviation, NAME is initials, TIMESTAMP is base-26
+function generateUniqueCode(stepName: string, recordName?: string): string {
+  // Get abbreviation from step name (first letters of each word)
+  const stepAbbrev = stepName
+    .split(/[\s_-]+/)
+    .map(word => word.charAt(0).toUpperCase())
+    .join('')
+    .slice(0, 3);
+
+  // Get initials from record name if available
+  const nameInitials = recordName
+    ? recordName
+        .split(/[\s_-]+/)
+        .map(word => word.charAt(0).toUpperCase())
+        .join('')
+        .slice(0, 3)
+    : '';
+
+  // Generate base-26 timestamp (uses a-z characters)
+  // This gives us a 6-character code that changes every ~10ms
+  const timestamp = Date.now();
+  const base26Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let code = '';
+  let num = timestamp % (26 * 26 * 26 * 26); // Use lower bits for shorter codes
+  for (let i = 0; i < 4; i++) {
+    code = base26Chars[num % 26] + code;
+    num = Math.floor(num / 26);
+  }
+
+  // Combine: STEP-NAME-CODE or STEP-CODE
+  if (nameInitials) {
+    return `${stepAbbrev}-${nameInitials}-${code}`;
+  }
+  return `${stepAbbrev}-${code}`;
+}
+
 // Entry Form Component
 function EntryForm({
   step,
@@ -42,15 +79,22 @@ function EntryForm({
     if (initialData) {
       return { ...initialData };
     }
-    // Initialize with default values
+    // Initialize with default values and autogenerate values
     const defaults: Record<string, unknown> = {};
     for (const col of step.columns) {
       if (col.defaultValue !== undefined) {
         defaults[col.name] = col.defaultValue;
       }
+      // Generate values for autogenerate fields (only for new entries)
+      if (col.autogenerate) {
+        defaults[col.name] = generateUniqueCode(step.name);
+      }
     }
     return defaults;
   });
+
+  // Track if autogenerate fields have been user-modified
+  const [userModifiedFields, setUserModifiedFields] = useState<Set<string>>(new Set());
 
   // State for external reference picker
   const [pickerColumn, setPickerColumn] = useState<ColumnDefinition | null>(null);
@@ -58,7 +102,27 @@ function EntryForm({
   const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>({});
 
   const handleChange = (name: string, value: unknown) => {
-    setFormData(prev => ({ ...prev, [name]: value }));
+    // Track if user manually modifies an autogenerate field
+    const col = step.columns.find(c => c.name === name);
+    if (col?.autogenerate) {
+      setUserModifiedFields(prev => new Set(prev).add(name));
+    }
+
+    setFormData(prev => {
+      const newData = { ...prev, [name]: value };
+
+      // If Name field changes and there are autogenerate fields that haven't been user-modified,
+      // update them with a new code incorporating the name
+      if (name === 'Name' && typeof value === 'string') {
+        for (const autoCol of step.columns) {
+          if (autoCol.autogenerate && !userModifiedFields.has(autoCol.name)) {
+            newData[autoCol.name] = generateUniqueCode(step.name, value);
+          }
+        }
+      }
+
+      return newData;
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
