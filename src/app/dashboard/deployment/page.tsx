@@ -148,6 +148,19 @@ export default function DeploymentPage() {
 
     const payload = convertToDeploymentPayload();
 
+    // Initialize progress immediately to show the progress section
+    setProgress({
+      currentStep: 'Initializing...',
+      currentStepIndex: 0,
+      totalSteps: payload.metadata.stepCount,
+      processedRecords: 0,
+      totalRecords: payload.metadata.totalEntries,
+      successCount: 0,
+      failureCount: 0,
+      skippedCount: 0,
+      phase: 'deployment',
+    });
+
     addLog('info', `Starting ${deploymentMode} deployment to ${connection.name}`);
     addLog('info', `Processing ${payload.metadata.totalEntries} entries across ${payload.metadata.stepCount} steps`);
 
@@ -496,28 +509,28 @@ export default function DeploymentPage() {
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-medium text-gray-500">Overall Progress</span>
                     <span className="text-xs text-gray-500">
-                      {progress.successCount + progress.failureCount} / {totalEntries} records processed
+                      {(progress.successCount || 0) + (progress.failureCount || 0)} / {totalEntries} records processed
                     </span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div
                       className="bg-black h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${totalEntries > 0 ? ((progress.successCount + progress.failureCount) / totalEntries) * 100 : 0}%` }}
+                      style={{ width: `${totalEntries > 0 ? (((progress.successCount || 0) + (progress.failureCount || 0)) / totalEntries) * 100 : 0}%` }}
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
                   <div className="bg-green-50 rounded-lg p-4 text-center">
-                    <p className="text-2xl font-semibold text-green-700">{progress.successCount}</p>
+                    <p className="text-2xl font-semibold text-green-700">{progress.successCount || 0}</p>
                     <p className="text-sm text-green-600">Successful</p>
                   </div>
                   <div className="bg-red-50 rounded-lg p-4 text-center">
-                    <p className="text-2xl font-semibold text-red-700">{progress.failureCount}</p>
+                    <p className="text-2xl font-semibold text-red-700">{progress.failureCount || 0}</p>
                     <p className="text-sm text-red-600">Failed</p>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-4 text-center">
-                    <p className="text-2xl font-semibold text-gray-700">{progress.skippedCount}</p>
+                    <p className="text-2xl font-semibold text-gray-700">{progress.skippedCount || 0}</p>
                     <p className="text-sm text-gray-600">Skipped</p>
                   </div>
                 </div>

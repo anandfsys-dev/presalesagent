@@ -301,6 +301,15 @@ export async function POST(request: Request) {
               currentOperationIndex: opIndex,
               totalOperations: postOps.length,
               operationType: op.type,
+              // Include final record counts for overall progress display
+              currentStep: 'Post-Deployment',
+              currentStepIndex: payload.steps.length,
+              totalSteps: payload.steps.length,
+              processedRecords: result.totalObjects,
+              totalRecords: result.totalObjects,
+              successCount: result.successCount,
+              failureCount: result.failureCount,
+              skippedCount: result.skippedCount,
             });
 
             if (op.type === 'wait') {
