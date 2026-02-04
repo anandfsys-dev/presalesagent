@@ -76,52 +76,56 @@ function EntryForm({
     const value = formData[col.name];
 
     switch (col.type) {
-      case 'reference':
-        // Check if this is an external reference
-        if (col.referenceType === 'external' && col.externalSobject) {
-          return (
-            <div key={col.name}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {col.name.replace(/_/g, ' ')} {col.required && <span className="text-red-500">*</span>}
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  type="text"
-                  value={externalRefNames[col.name] || (value as string) || ''}
-                  onChange={(e) => {
-                    handleChange(col.name, e.target.value);
-                    // Clear the display name if user manually edits
-                    if (externalRefNames[col.name]) {
-                      setExternalRefNames(prev => {
-                        const newNames = { ...prev };
-                        delete newNames[col.name];
-                        return newNames;
-                      });
-                    }
-                  }}
-                  placeholder={`Enter ${col.externalSobject} ID or use Get button`}
-                  className="flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setPickerColumn(col)}
-                  disabled={!connectionId}
-                  title={!connectionId ? 'Select a Salesforce connection first' : `Select from ${col.externalSobject}`}
-                >
-                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                  Get
-                </Button>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Lookup from: {col.externalSobject}
-              </p>
+      case 'salesforce_id':
+        // Salesforce ID - external Salesforce record lookup
+        return (
+          <div key={col.name}>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {col.name.replace(/_/g, ' ')} {col.required && <span className="text-red-500">*</span>}
+            </label>
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={(value as string) || ''}
+                onChange={(e) => {
+                  handleChange(col.name, e.target.value);
+                  // Clear the display name if user manually edits
+                  if (externalRefNames[col.name]) {
+                    setExternalRefNames(prev => {
+                      const newNames = { ...prev };
+                      delete newNames[col.name];
+                      return newNames;
+                    });
+                  }
+                }}
+                placeholder={`Enter ${col.externalSobject || 'Salesforce'} ID or use Get button`}
+                className="flex-1 font-mono text-sm"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPickerColumn(col)}
+                disabled={!connectionId || !col.externalSobject}
+                title={!connectionId ? 'Select a Salesforce connection first' : !col.externalSobject ? 'No Salesforce object configured' : `Select from ${col.externalSobject}`}
+              >
+                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                Get
+              </Button>
             </div>
-          );
-        }
+            {externalRefNames[col.name] && (
+              <p className="text-xs text-green-600 mt-1">
+                Selected: {externalRefNames[col.name]}
+              </p>
+            )}
+            <p className="text-xs text-gray-500 mt-1">
+              Lookup from: {col.externalSobject || 'Not configured'}
+            </p>
+          </div>
+        );
 
+      case 'reference':
         // Internal reference (existing behavior)
         const options = getReferenceOptions(step.id, col);
         return (

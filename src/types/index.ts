@@ -52,17 +52,15 @@ export interface PipelineStep {
 
 export interface ColumnDefinition {
   name: string;
-  type: 'string' | 'number' | 'boolean' | 'date' | 'currency' | 'reference' | 'picklist';
+  type: 'string' | 'number' | 'boolean' | 'date' | 'currency' | 'reference' | 'picklist' | 'salesforce_id';
   required: boolean;
   description?: string;
   defaultValue?: string | number | boolean;
-  referenceTo?: string; // For reference types, which object it references (internal step ID)
+  referenceTo?: string; // For reference types, which pipeline step it references
   referenceDisplayField?: string; // Field to display for reference selection
   sfField?: string; // Salesforce API field name
   picklistValues?: string[]; // For picklist types, allowed values
-  // External Salesforce reference properties
-  referenceType?: 'internal' | 'external'; // 'internal' = pipeline step reference, 'external' = Salesforce record
-  externalSobject?: string; // For external references, the Salesforce object API name (e.g., 'Account', 'Product2')
+  externalSobject?: string; // For salesforce_id type, the Salesforce object API name (e.g., 'Account', 'Product2')
 }
 
 export interface ParentIdMapping {
