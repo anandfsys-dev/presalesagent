@@ -369,16 +369,30 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
 
   // Get reference options for dropdown fields
   const getReferenceOptions = useCallback((stepId: string, column: ColumnDefinition): { value: string; label: string }[] => {
-    if (column.type !== 'reference' || !column.referenceTo) return [];
+    if (column.type !== 'reference') return [];
 
-    const refStepId = column.referenceTo;
+    // First check if column has referenceTo directly set
+    let refStepId = column.referenceTo;
+    let displayField = column.referenceDisplayField || 'Name';
+
+    // If not, check parentIdMappings for this step to find the reference
+    if (!refStepId) {
+      const currentStep = pipelineConfig.steps.find(s => s.id === stepId);
+      if (currentStep && currentStep.parentIdMappings) {
+        const mapping = currentStep.parentIdMappings.find(m => m.field === column.name);
+        if (mapping) {
+          refStepId = mapping.parentStep;
+          displayField = mapping.parentField || 'Name';
+        }
+      }
+    }
+
+    if (!refStepId) return [];
+
     const refEntries = state[refStepId] || [];
     const refStep = pipelineConfig.steps.find(s => s.id === refStepId);
 
     if (!refStep) return [];
-
-    // Find the display field (usually 'Name')
-    const displayField = column.referenceDisplayField || 'Name';
 
     return refEntries.map(e => ({
       value: e._id,

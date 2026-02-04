@@ -287,15 +287,8 @@ export function NodeConfigPanel({
                       className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-black"
                     >
                       <option value="">Select field...</option>
-                      {columns
-                        .filter((col) => col.type === 'reference' || col.name.toLowerCase().includes('id'))
-                        .map((col) => (
-                          <option key={col.name} value={col.name}>
-                            {col.name}
-                          </option>
-                        ))}
                       {columns.map((col) => (
-                        <option key={`all-${col.name}`} value={col.name}>
+                        <option key={col.name} value={col.name}>
                           {col.name}
                         </option>
                       ))}
