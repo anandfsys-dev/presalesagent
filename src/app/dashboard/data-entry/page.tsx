@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -16,6 +16,11 @@ import {
 } from '@/components/ui';
 import { useConfigData, DataEntry, ExportData } from '@/contexts/ConfigDataContext';
 import type { SalesforceConnection, PipelineStep, ColumnDefinition } from '@/types';
+
+// Lazy load the Visual Data Builder to avoid SSR issues with React Flow
+const VisualDataBuilder = lazy(() => import('@/components/data-entry/VisualDataBuilder'));
+
+type ViewMode = 'hierarchical' | 'visual';
 
 // Entry Form Component
 function EntryForm({
@@ -328,6 +333,7 @@ export default function DataEntryPage() {
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
   const [selectedConnection, setSelectedConnection] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('hierarchical');
 
   // Fetch connections
   useEffect(() => {
@@ -449,7 +455,7 @@ export default function DataEntryPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Hierarchical Data Entry</h1>
+          <h1 className="text-2xl font-semibold text-gray-900">Data Entry</h1>
           <p className="text-gray-600 mt-1">
             Configure Salesforce Revenue Cloud objects with automatic relationship mapping
           </p>
@@ -457,6 +463,42 @@ export default function DataEntryPage() {
         <Badge variant={totalEntries > 0 ? 'success' : 'default'}>
           {totalEntries} total entries
         </Badge>
+      </div>
+
+      {/* View Mode Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setViewMode('hierarchical')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+              viewMode === 'hierarchical'
+                ? 'border-black text-gray-900'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+              Hierarchical View
+            </div>
+          </button>
+          <button
+            onClick={() => setViewMode('visual')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+              viewMode === 'visual'
+                ? 'border-black text-gray-900'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+              </svg>
+              Visual Builder
+            </div>
+          </button>
+        </nav>
       </div>
 
       {statusMessage && (
@@ -524,70 +566,140 @@ export default function DataEntryPage() {
         </div>
       </div>
 
-      {/* Notification for schema updates */}
-      {recentlyChangedSteps.length > 0 && (
-        <Alert
-          variant="warning"
-          onClose={clearRecentlyChangedSteps}
-        >
-          Pipeline configuration has been updated. The highlighted sections below have schema changes.
-        </Alert>
+      {/* Hierarchical View */}
+      {viewMode === 'hierarchical' && (
+        <>
+          {/* Notification for schema updates */}
+          {recentlyChangedSteps.length > 0 && (
+            <Alert
+              variant="warning"
+              onClose={clearRecentlyChangedSteps}
+            >
+              Pipeline configuration has been updated. The highlighted sections below have schema changes.
+            </Alert>
+          )}
+
+          {/* Data Entry Sections by Category */}
+          {Object.entries(stepsByCategory).map(([category, steps]) => (
+            <div key={category} className="space-y-3">
+              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                {category}
+              </h2>
+              <div className="space-y-2 ml-4">
+                {steps.map(step => (
+                  <StepPanel
+                    key={step.id}
+                    step={step}
+                    isHighlighted={recentlyChangedSteps.includes(step.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* Summary Card */}
+          {totalEntries > 0 && (
+            <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+              <CardHeader>
+                <CardTitle>Deployment Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                  {pipelineConfig.steps.map((step) => {
+                    const count = (state[step.id] || []).length;
+                    return (
+                      <div
+                        key={step.id}
+                        className={`p-3 rounded-lg text-center ${
+                          count > 0 ? 'bg-white shadow-sm' : 'bg-gray-50'
+                        }`}
+                      >
+                        <p className="text-xs font-medium text-gray-600 truncate" title={step.name}>
+                          {step.name}
+                        </p>
+                        <p className={`text-xl font-bold ${count > 0 ? 'text-blue-600' : 'text-gray-300'}`}>
+                          {count}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <Button onClick={handleDeploy} disabled={!selectedConnection} className="px-6">
+                    Deploy {totalEntries} Entries to Salesforce
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
-      {/* Data Entry Sections by Category */}
-      {Object.entries(stepsByCategory).map(([category, steps]) => (
-        <div key={category} className="space-y-3">
-          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-            {category}
-          </h2>
-          <div className="space-y-2 ml-4">
-            {steps.map(step => (
-              <StepPanel
-                key={step.id}
-                step={step}
-                isHighlighted={recentlyChangedSteps.includes(step.id)}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
-
-      {/* Summary Card */}
-      {totalEntries > 0 && (
-        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
-          <CardHeader>
-            <CardTitle>Deployment Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-              {pipelineConfig.steps.map((step) => {
-                const count = (state[step.id] || []).length;
-                return (
-                  <div
-                    key={step.id}
-                    className={`p-3 rounded-lg text-center ${
-                      count > 0 ? 'bg-white shadow-sm' : 'bg-gray-50'
-                    }`}
-                  >
-                    <p className="text-xs font-medium text-gray-600 truncate" title={step.name}>
-                      {step.name}
-                    </p>
-                    <p className={`text-xl font-bold ${count > 0 ? 'text-blue-600' : 'text-gray-300'}`}>
-                      {count}
-                    </p>
+      {/* Visual Builder View */}
+      {viewMode === 'visual' && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                </svg>
+                Visual Data Builder
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 mb-4">
+                Drag objects from the sidebar to the canvas. Click on objects to edit their properties.
+                Use the &quot;Add Linked Entry&quot; button to create related objects with automatic reference linking.
+              </p>
+              <Suspense fallback={
+                <div className="h-[700px] flex items-center justify-center bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading Visual Builder...</p>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              }>
+                <VisualDataBuilder />
+              </Suspense>
+            </CardContent>
+          </Card>
 
-            <div className="mt-6 flex justify-end">
-              <Button onClick={handleDeploy} disabled={!selectedConnection} className="px-6">
-                Deploy {totalEntries} Entries to Salesforce
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Summary for Visual Builder */}
+          {totalEntries > 0 && (
+            <Card className="bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm font-medium text-gray-700">
+                      Total Objects: <span className="text-purple-600 font-bold">{totalEntries}</span>
+                    </span>
+                    <span className="text-sm text-gray-500">|</span>
+                    <div className="flex items-center gap-2">
+                      {pipelineConfig.steps.slice(0, 5).map((step) => {
+                        const count = (state[step.id] || []).length;
+                        if (count === 0) return null;
+                        return (
+                          <Badge key={step.id} variant="default">
+                            {step.name}: {count}
+                          </Badge>
+                        );
+                      })}
+                      {pipelineConfig.steps.filter(s => (state[s.id] || []).length > 0).length > 5 && (
+                        <span className="text-xs text-gray-500">+more</span>
+                      )}
+                    </div>
+                  </div>
+                  <Button onClick={handleDeploy} disabled={!selectedConnection}>
+                    Deploy to Salesforce
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* Auto-save indicator */}
