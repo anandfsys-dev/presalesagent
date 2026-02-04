@@ -66,7 +66,8 @@ type ConfigDataAction =
   | { type: 'SET_ENTRIES'; stepId: string; entries: DataEntry[] }
   | { type: 'CLEAR_ALL'; config: PipelineConfig }
   | { type: 'LOAD_DATA'; data: Partial<ConfigDataState> }
-  | { type: 'IMPORT_DATA'; data: ConfigDataState; config: PipelineConfig };
+  | { type: 'IMPORT_DATA'; data: ConfigDataState; config: PipelineConfig }
+  | { type: 'SYNC_WITH_CONFIG'; config: PipelineConfig };
 
 // Reducer
 function configDataReducer(state: ConfigDataState, action: ConfigDataAction): ConfigDataState {
@@ -113,6 +114,15 @@ function configDataReducer(state: ConfigDataState, action: ConfigDataAction): Co
         if (Array.isArray(value)) {
           newState[key] = value;
         }
+      }
+      return newState;
+    }
+    case 'SYNC_WITH_CONFIG': {
+      // Ensure state has entries for all steps in the config
+      // Preserve existing data, add empty arrays for new steps, remove orphaned steps
+      const newState: ConfigDataState = {};
+      for (const step of action.config.steps) {
+        newState[step.id] = state[step.id] || [];
       }
       return newState;
     }
@@ -231,12 +241,48 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
   const refreshPipelineConfig = useCallback(async () => {
     const config = await loadPipelineConfig();
     setPipelineConfig(config);
+    // Sync state structure with refreshed config
+    dispatch({ type: 'SYNC_WITH_CONFIG', config });
   }, [loadPipelineConfig]);
 
   // Update pipeline config directly (for local changes without DB)
   const updatePipelineConfig = useCallback((newConfig: PipelineConfig) => {
+    // Track changes for schema indicator
+    const changedStepIds: string[] = [];
+
+    // Find new steps (not in current config)
+    const currentStepIds = new Set(pipelineConfig.steps.map(s => s.id));
+    for (const step of newConfig.steps) {
+      if (!currentStepIds.has(step.id)) {
+        changedStepIds.push(step.id);
+      }
+    }
+
+    // Find modified steps (columns changed)
+    for (const newStep of newConfig.steps) {
+      const oldStep = pipelineConfig.steps.find(s => s.id === newStep.id);
+      if (oldStep) {
+        const oldColNames = oldStep.columns.map(c => c.name).sort().join(',');
+        const newColNames = newStep.columns.map(c => c.name).sort().join(',');
+        if (oldColNames !== newColNames) {
+          if (!changedStepIds.includes(newStep.id)) {
+            changedStepIds.push(newStep.id);
+          }
+        }
+      }
+    }
+
+    // Update the changed steps indicator
+    if (changedStepIds.length > 0) {
+      setRecentlyChangedSteps(changedStepIds);
+    }
+
+    // Update pipeline config
     setPipelineConfig(newConfig);
-  }, []);
+
+    // Sync state structure with new config (ensure all steps have entries)
+    dispatch({ type: 'SYNC_WITH_CONFIG', config: newConfig });
+  }, [pipelineConfig]);
 
   // Migrate data when column names change
   const migrateDataForColumnChanges = useCallback((oldConfig: PipelineConfig, newConfig: PipelineConfig): string[] => {
