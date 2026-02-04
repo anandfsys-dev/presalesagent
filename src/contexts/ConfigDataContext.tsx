@@ -164,9 +164,19 @@ export interface DeploymentPayload {
     method: string;
     entries: Record<string, unknown>[];
   }[];
+  postDeploymentOperations: {
+    id: string;
+    name: string;
+    type: 'wait' | 'GET' | 'POST';
+    order: number;
+    waitTimeSeconds?: number;
+    endpoint?: string;
+    payload?: Record<string, unknown>;
+  }[];
   metadata: {
     totalEntries: number;
     stepCount: number;
+    postDeploymentCount: number;
   };
 }
 
@@ -448,11 +458,24 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
       });
     }
 
+    // Include post-deployment operations
+    const postDeploymentOperations = (pipelineConfig.postDeploymentOperations || []).map(op => ({
+      id: op.id,
+      name: op.name,
+      type: op.type,
+      order: op.order,
+      waitTimeSeconds: op.waitTimeSeconds,
+      endpoint: op.endpoint,
+      payload: op.payload,
+    }));
+
     return {
       steps,
+      postDeploymentOperations,
       metadata: {
         totalEntries: getTotalEntryCount(),
         stepCount: steps.length,
+        postDeploymentCount: postDeploymentOperations.length,
       },
     };
   }, [state, pipelineConfig, getTotalEntryCount]);

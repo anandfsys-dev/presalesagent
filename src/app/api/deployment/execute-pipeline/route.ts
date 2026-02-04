@@ -287,6 +287,84 @@ export async function POST(request: Request) {
           });
         }
 
+        // Execute post-deployment operations
+        const postOps = payload.postDeploymentOperations || [];
+        if (postOps.length > 0) {
+          send('log', { level: 'info', message: `Starting ${postOps.length} post-deployment operations...` });
+
+          for (let opIndex = 0; opIndex < postOps.length; opIndex++) {
+            const op = postOps[opIndex];
+
+            send('progress', {
+              phase: 'post_deployment',
+              currentOperation: op.name,
+              currentOperationIndex: opIndex,
+              totalOperations: postOps.length,
+              operationType: op.type,
+            });
+
+            if (op.type === 'wait') {
+              send('log', { level: 'info', message: `Waiting ${op.waitTimeSeconds} seconds...` });
+              await new Promise(resolve => setTimeout(resolve, (op.waitTimeSeconds || 5) * 1000));
+              send('log', { level: 'info', message: `Wait completed` });
+
+            } else if (op.type === 'GET' && op.endpoint) {
+              send('log', { level: 'info', message: `Executing GET ${op.endpoint}` });
+              try {
+                const getResponse = await sfClient.get(op.endpoint);
+                send('log', { level: 'info', message: `GET ${op.endpoint} completed successfully` });
+                send('post_deployment_result', {
+                  operationId: op.id,
+                  operationName: op.name,
+                  type: 'GET',
+                  endpoint: op.endpoint,
+                  success: true,
+                  response: getResponse,
+                });
+              } catch (err) {
+                const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                send('log', { level: 'error', message: `GET ${op.endpoint} failed: ${errorMsg}` });
+                send('post_deployment_result', {
+                  operationId: op.id,
+                  operationName: op.name,
+                  type: 'GET',
+                  endpoint: op.endpoint,
+                  success: false,
+                  error: errorMsg,
+                });
+              }
+
+            } else if (op.type === 'POST' && op.endpoint) {
+              send('log', { level: 'info', message: `Executing POST ${op.endpoint}` });
+              try {
+                const postResponse = await sfClient.post(op.endpoint, op.payload || {});
+                send('log', { level: 'info', message: `POST ${op.endpoint} completed successfully` });
+                send('post_deployment_result', {
+                  operationId: op.id,
+                  operationName: op.name,
+                  type: 'POST',
+                  endpoint: op.endpoint,
+                  success: true,
+                  response: postResponse,
+                });
+              } catch (err) {
+                const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                send('log', { level: 'error', message: `POST ${op.endpoint} failed: ${errorMsg}` });
+                send('post_deployment_result', {
+                  operationId: op.id,
+                  operationName: op.name,
+                  type: 'POST',
+                  endpoint: op.endpoint,
+                  success: false,
+                  error: errorMsg,
+                });
+              }
+            }
+          }
+
+          send('log', { level: 'info', message: `All post-deployment operations completed` });
+        }
+
         const durationSeconds = Math.round((Date.now() - startTime) / 1000);
         result.success = result.failureCount === 0;
 

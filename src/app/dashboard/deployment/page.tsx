@@ -26,6 +26,22 @@ interface DeploymentProgress {
   successCount: number;
   failureCount: number;
   skippedCount: number;
+  // Post-deployment phase
+  phase?: 'deployment' | 'post_deployment';
+  currentOperation?: string;
+  currentOperationIndex?: number;
+  totalOperations?: number;
+  operationType?: string;
+}
+
+interface PostDeploymentResult {
+  operationId: string;
+  operationName: string;
+  type: 'GET' | 'POST';
+  endpoint: string;
+  success: boolean;
+  response?: unknown;
+  error?: string;
 }
 
 interface DeploymentLog {
@@ -61,6 +77,7 @@ export default function DeploymentPage() {
   const [progress, setProgress] = useState<DeploymentProgress | null>(null);
   const [logs, setLogs] = useState<DeploymentLog[]>([]);
   const [createdRecords, setCreatedRecords] = useState<CreatedRecord[]>([]);
+  const [postDeploymentResults, setPostDeploymentResults] = useState<PostDeploymentResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     success: boolean;
@@ -126,6 +143,7 @@ export default function DeploymentPage() {
     setError(null);
     setLogs([]);
     setCreatedRecords([]);
+    setPostDeploymentResults([]);
     setResult(null);
 
     const payload = convertToDeploymentPayload();
@@ -169,6 +187,8 @@ export default function DeploymentPage() {
             } else if (event.type === 'record_created') {
               setCreatedRecords(prev => [...prev, event.data]);
               addLog('success', `Created ${event.data.objectType}: ${event.data.name}`, event.data.salesforceId, event.data.objectType);
+            } else if (event.type === 'post_deployment_result') {
+              setPostDeploymentResults(prev => [...prev, event.data]);
             } else if (event.type === 'complete') {
               setResult(event.data);
               setDeploymentComplete(true);
@@ -325,6 +345,7 @@ export default function DeploymentPage() {
                     setProgress(null);
                     setLogs([]);
                     setCreatedRecords([]);
+                    setPostDeploymentResults([]);
                   }}>
                     Reset
                   </Button>
@@ -361,6 +382,28 @@ export default function DeploymentPage() {
                 </ul>
               </div>
             ))}
+
+            {/* Post-Deployment Operations */}
+            {pipelineConfig.postDeploymentOperations && pipelineConfig.postDeploymentOperations.length > 0 && (
+              <div className="border rounded-lg p-4 bg-purple-50 border-purple-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-medium text-gray-900">Post-Deployment</h4>
+                  <Badge variant="default">{pipelineConfig.postDeploymentOperations.length}</Badge>
+                </div>
+                <ul className="space-y-1">
+                  {pipelineConfig.postDeploymentOperations.map(op => (
+                    <li key={op.id} className="text-sm text-gray-600 flex justify-between">
+                      <span>{op.name}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        op.type === 'wait' ? 'bg-gray-200 text-gray-700' :
+                        op.type === 'GET' ? 'bg-blue-200 text-blue-700' :
+                        'bg-green-200 text-green-700'
+                      }`}>{op.type}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -381,20 +424,87 @@ export default function DeploymentPage() {
           <CardContent>
             {progress && (
               <div className="space-y-4">
+                {/* Phase indicator */}
+                <div className="flex items-center gap-2 mb-4">
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+                    progress.phase === 'post_deployment'
+                      ? 'bg-gray-200 text-gray-600'
+                      : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    <div className={`w-2 h-2 rounded-full ${progress.phase !== 'post_deployment' ? 'bg-blue-500 animate-pulse' : 'bg-gray-400'}`} />
+                    Object Deployment
+                  </div>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+                    progress.phase === 'post_deployment'
+                      ? 'bg-purple-100 text-purple-700'
+                      : 'bg-gray-200 text-gray-600'
+                  }`}>
+                    <div className={`w-2 h-2 rounded-full ${progress.phase === 'post_deployment' ? 'bg-purple-500 animate-pulse' : 'bg-gray-400'}`} />
+                    Post-Deployment
+                  </div>
+                </div>
+
+                {/* Current operation display */}
+                {progress.phase === 'post_deployment' ? (
+                  <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-purple-900">
+                        Operation {(progress.currentOperationIndex || 0) + 1} of {progress.totalOperations}: {progress.currentOperation}
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                        progress.operationType === 'wait' ? 'bg-gray-200 text-gray-700' :
+                        progress.operationType === 'GET' ? 'bg-blue-200 text-blue-700' :
+                        'bg-green-200 text-green-700'
+                      }`}>
+                        {progress.operationType}
+                      </span>
+                    </div>
+                    <ProgressBar
+                      value={(progress.currentOperationIndex || 0) + 1}
+                      max={progress.totalOperations || 1}
+                      showPercentage
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-blue-900">
+                          Step {progress.currentStepIndex + 1} of {progress.totalSteps}:
+                        </span>
+                        <span className="text-sm font-semibold text-blue-900">
+                          {progress.currentStep}
+                        </span>
+                      </div>
+                      <span className="text-sm text-blue-600">
+                        {progress.processedRecords} / {progress.totalRecords} records
+                      </span>
+                    </div>
+                    <ProgressBar
+                      value={progress.processedRecords}
+                      max={progress.totalRecords}
+                      showPercentage
+                    />
+                  </div>
+                )}
+
+                {/* Overall progress bar */}
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-700">
-                      Step {progress.currentStepIndex + 1} of {progress.totalSteps}: {progress.currentStep}
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      {progress.processedRecords} / {progress.totalRecords} records
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-gray-500">Overall Progress</span>
+                    <span className="text-xs text-gray-500">
+                      {progress.successCount + progress.failureCount} / {totalEntries} records processed
                     </span>
                   </div>
-                  <ProgressBar
-                    value={progress.processedRecords}
-                    max={progress.totalRecords}
-                    showPercentage
-                  />
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-black h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${totalEntries > 0 ? ((progress.successCount + progress.failureCount) / totalEntries) * 100 : 0}%` }}
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
@@ -484,6 +594,66 @@ export default function DeploymentPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Post-Deployment Results */}
+      {postDeploymentResults.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Post-Deployment Results ({postDeploymentResults.length})
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {postDeploymentResults.map((result, idx) => (
+                <div
+                  key={idx}
+                  className={`p-4 rounded-lg border ${
+                    result.success
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-red-50 border-red-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        result.type === 'GET' ? 'bg-blue-200 text-blue-700' : 'bg-green-200 text-green-700'
+                      }`}>
+                        {result.type}
+                      </span>
+                      <span className="font-medium text-gray-900">{result.operationName}</span>
+                    </div>
+                    <Badge variant={result.success ? 'success' : 'error'}>
+                      {result.success ? 'Success' : 'Failed'}
+                    </Badge>
+                  </div>
+                  <code className="text-xs bg-white/50 px-2 py-1 rounded text-gray-700 block truncate">
+                    {result.endpoint}
+                  </code>
+                  {result.error && (
+                    <p className="text-sm text-red-600 mt-2">{result.error}</p>
+                  )}
+                  {result.success && result.response !== undefined && (
+                    <details className="mt-2">
+                      <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                        View Response
+                      </summary>
+                      <pre className="text-xs bg-white/50 p-2 rounded mt-1 overflow-x-auto max-h-40">
+                        {JSON.stringify(result.response, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>

@@ -207,6 +207,23 @@ export class SalesforceClient {
   }
 
   /**
+   * Make a GET request to any Salesforce endpoint
+   */
+  async get<T = unknown>(endpoint: string): Promise<T> {
+    return this.request<T>(endpoint, { method: 'GET' });
+  }
+
+  /**
+   * Make a POST request to any Salesforce endpoint with a payload
+   */
+  async post<T = unknown>(endpoint: string, data: Record<string, unknown>): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
    * Test connection by making a simple API call
    */
   async testConnection(): Promise<boolean> {
