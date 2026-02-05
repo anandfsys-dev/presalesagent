@@ -3,10 +3,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, useConfirmDialog } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { PipelineEditor } from '@/components/pipeline';
 import { DEFAULT_PIPELINE_CONFIG, validatePipelineConfig } from '@/lib/pipeline/config';
 import { downloadAllTemplates, downloadCSV, generateCSVTemplates } from '@/lib/csv/generator';
 import { useConfigData } from '@/contexts/ConfigDataContext';
+import { useUser } from '@/contexts/UserContext';
 import { useToast } from '@/contexts/ToastContext';
 import type { PipelineConfig, PostDeploymentOperation } from '@/types';
 
@@ -328,6 +330,7 @@ function PostDeploymentSection({
 
 export default function PipelinePage() {
   const supabase = createClient();
+  const { user } = useUser();
   const { pipelineConfig: contextConfig, updatePipelineConfig, migrateDataForColumnChanges, refreshPipelineConfig } = useConfigData();
   const toast = useToast();
   const { confirm } = useConfirmDialog();
@@ -502,28 +505,26 @@ export default function PipelinePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex-1 flex items-center justify-center bg-gray-100">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Pipeline Configuration</h1>
-          <p className="text-gray-600 mt-1">
-            Configure deployment objects, dependencies, and field mappings
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={handleResetToDefault}>
-            Reset to Default
-          </Button>
-        </div>
-      </div>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <PageHeader
+        title="Pipeline Config"
+        subtitle="Configure Deployment Objects and Mappings"
+        user={user}
+      >
+        <Button variant="outline" onClick={handleResetToDefault}>
+          Reset to Default
+        </Button>
+      </PageHeader>
+
+      <div className="flex-1 overflow-y-auto p-6 bg-gray-100">
+        <div className="max-w-6xl mx-auto space-y-6">
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
@@ -855,6 +856,9 @@ export default function PipelinePage() {
           </div>
         </div>
       )}
+
+        </div>
+      </div>
     </div>
   );
 }

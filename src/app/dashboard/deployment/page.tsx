@@ -14,7 +14,9 @@ import {
   ProgressBar,
   Select,
 } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { useConfigData, DeploymentPayload } from '@/contexts/ConfigDataContext';
+import { useUser } from '@/contexts/UserContext';
 import type { SalesforceConnection } from '@/types';
 
 interface DeploymentProgress {
@@ -66,6 +68,7 @@ type DeploymentMode = 'full' | 'incremental' | 'validation_only';
 export default function DeploymentPage() {
   const router = useRouter();
   const supabase = createClient();
+  const { user } = useUser();
   const { state, pipelineConfig, getTotalEntryCount, convertToDeploymentPayload, stepsByCategory } = useConfigData();
 
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
@@ -283,43 +286,46 @@ export default function DeploymentPage() {
 
   if (totalEntries === 0) {
     return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Deployment</h1>
-          <p className="text-gray-600 mt-1">No data available for deployment</p>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <PageHeader
+          title="Deployment"
+          subtitle="Deploy to Salesforce Revenue Cloud"
+          user={user}
+        />
+        <div className="flex-1 overflow-y-auto p-6 bg-gray-100">
+          <Card className="border-2 border-dashed border-gray-300 bg-gray-50 max-w-2xl mx-auto">
+            <CardContent className="text-center py-12">
+              <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                No Configuration Data
+              </h3>
+              <p className="text-gray-600 mb-6">
+                Add data in the Data Entry page before deploying to Salesforce.
+              </p>
+              <Button onClick={() => router.push('/dashboard/data-entry')}>
+                Go to Data Entry
+              </Button>
+            </CardContent>
+          </Card>
         </div>
-
-        <Card className="border-2 border-dashed border-gray-300 bg-gray-50">
-          <CardContent className="text-center py-12">
-            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              No Configuration Data
-            </h3>
-            <p className="text-gray-600 mb-6">
-              Add data in the Data Entry page before deploying to Salesforce.
-            </p>
-            <Button onClick={() => router.push('/dashboard/data-entry')}>
-              Go to Data Entry
-            </Button>
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Deployment</h1>
-        <p className="text-gray-600 mt-1">
-          Deploy configuration to Salesforce Revenue Cloud
-        </p>
-      </div>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <PageHeader
+        title="Deployment"
+        subtitle="Deploy to Salesforce Revenue Cloud"
+        user={user}
+      />
+
+      <div className="flex-1 overflow-y-auto p-6 bg-gray-100">
+        <div className="max-w-6xl mx-auto space-y-6">
 
       {/* Deployment Configuration */}
       <Card>
@@ -735,6 +741,9 @@ export default function DeploymentPage() {
           </CardContent>
         </Card>
       )}
+
+        </div>
+      </div>
     </div>
   );
 }

@@ -15,10 +15,13 @@ import {
   Alert,
   Spinner,
 } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { useUser } from '@/contexts/UserContext';
 import type { SalesforceConnection, ConnectionFormData } from '@/types';
 
 export default function ConnectionsPage() {
   const supabase = createClient();
+  const { user } = useUser();
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkingStatus, setCheckingStatus] = useState<Set<string>>(new Set());
@@ -255,7 +258,7 @@ export default function ConnectionsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex-1 flex items-center justify-center bg-gray-100">
         <div className="text-center">
           <Spinner size="lg" />
           <p className="mt-4 text-gray-600">Loading connections...</p>
@@ -265,22 +268,22 @@ export default function ConnectionsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Connections</h1>
-          <p className="text-gray-600 mt-1">
-            Manage your Salesforce org connections
-          </p>
-        </div>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <PageHeader
+        title="Connections"
+        subtitle="Manage Salesforce Org Connections"
+        user={user}
+      >
         <Button onClick={() => setShowAddModal(true)}>
           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           Add Connection
         </Button>
-      </div>
+      </PageHeader>
+
+      <div className="flex-1 overflow-y-auto p-6 bg-gray-100">
+        <div className="max-w-6xl mx-auto space-y-6">
 
       {/* Status Message */}
       {statusMessage && (
@@ -530,6 +533,9 @@ export default function ConnectionsPage() {
           </Button>
         </ModalFooter>
       </Modal>
+
+        </div>
+      </div>
     </div>
   );
 }

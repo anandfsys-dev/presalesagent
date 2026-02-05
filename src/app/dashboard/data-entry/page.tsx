@@ -2,28 +2,23 @@
 
 import React, { useState, useRef, Suspense, lazy } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-  Button,
-  Badge,
-} from '@/components/ui';
+import { Button, Badge } from '@/components/ui';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { useConfigData, ExportData } from '@/contexts/ConfigDataContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirmDialog } from '@/components/ui/ConfirmDialog';
-import HierarchicalDataEntry from '@/components/data-entry/HierarchicalDataEntry';
+import { useUser } from '@/contexts/UserContext';
+import TableDataEntry from '@/components/data-entry/TableDataEntry';
 
 // Lazy load the Visual Data Builder to avoid SSR issues with React Flow
 const VisualDataBuilder = lazy(() => import('@/components/data-entry/VisualDataBuilder'));
 
 type ViewMode = 'hierarchical' | 'visual';
 
-// Main Data Entry Content
 export default function DataEntryPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user } = useUser();
   const {
     state,
     pipelineConfig,
@@ -36,6 +31,7 @@ export default function DataEntryPage() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('hierarchical');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [relationshipMappingActive, setRelationshipMappingActive] = useState(true);
   const toast = useToast();
   const { confirm } = useConfirmDialog();
 
@@ -84,15 +80,12 @@ export default function DataEntryPage() {
       const text = await file.text();
       const imported: ExportData = JSON.parse(text);
 
-      // Validate the imported data
       if (!imported.data || typeof imported.data !== 'object') {
         throw new Error('Invalid file format: missing data property');
       }
 
-      // Import the data
       importData(imported.data);
 
-      // Count imported entries
       let count = 0;
       for (const entries of Object.values(imported.data)) {
         if (Array.isArray(entries)) {
@@ -105,7 +98,6 @@ export default function DataEntryPage() {
       toast.error(`Failed to import: ${error instanceof Error ? error.message : 'Invalid JSON file'}`);
     }
 
-    // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -114,7 +106,7 @@ export default function DataEntryPage() {
   // Show loading state while hydrating from localStorage
   if (!isHydrated) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex-1 flex items-center justify-center bg-gray-100">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading saved data...</p>
@@ -124,7 +116,7 @@ export default function DataEntryPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex-1 flex flex-col overflow-hidden">
       {/* Hidden file input for import */}
       <input
         type="file"
@@ -134,107 +126,107 @@ export default function DataEntryPage() {
         className="hidden"
       />
 
-      {/* Header with Controls */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Data Entry</h1>
-          <p className="text-gray-600 mt-1">
-            Configure Salesforce Revenue Cloud objects with automatic relationship mapping
-          </p>
-        </div>
+      {/* Page Header */}
+      <PageHeader
+        title="Data Entry"
+        subtitle="Salesforce Revenue Cloud Config"
+        user={user}
+      >
         <div className="flex items-center gap-3">
-          <Badge variant={totalEntries > 0 ? 'success' : 'default'}>
-            {totalEntries} total entries
-          </Badge>
+          <button
+            onClick={handleImportJSON}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            IMPORT JSON
+          </button>
+          <button
+            onClick={handleExportJSON}
+            disabled={totalEntries === 0}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            EXPORT JSON
+          </button>
+          <button
+            onClick={handleDeploy}
+            disabled={totalEntries === 0}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            PROCEED TO DEPLOYMENT
+            {totalEntries > 0 && (
+              <span className="bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                {totalEntries}
+              </span>
+            )}
+          </button>
         </div>
-      </div>
+      </PageHeader>
 
-      {/* Controls - Common for both tabs */}
-      <div className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleImportJSON}>
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            Import JSON
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExportJSON} disabled={totalEntries === 0}>
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export JSON
-          </Button>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleClear} disabled={totalEntries === 0}>
-            Clear All
-          </Button>
-          <Button size="sm" onClick={handleDeploy} disabled={totalEntries === 0}>
-            Proceed to Deployment ({totalEntries})
-          </Button>
-        </div>
-      </div>
-
-      {/* View Mode Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
+      {/* Sub-header with View Toggle and Relationship Mapping */}
+      <div className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between">
+        {/* View Toggle Tabs */}
+        <div className="flex">
           <button
             onClick={() => setViewMode('hierarchical')}
-            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
               viewMode === 'hierarchical'
-                ? 'border-black text-gray-900'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-              </svg>
-              Hierarchical View
-            </div>
+            Hierarchical View
           </button>
           <button
             onClick={() => setViewMode('visual')}
-            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ml-2 ${
               viewMode === 'visual'
-                ? 'border-black text-gray-900'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-              </svg>
-              Visual Builder
-            </div>
+            Visual Builder
           </button>
-        </nav>
+        </div>
+
+        {/* Relationship Mapping Status */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">
+              {relationshipMappingActive ? 'AUTOMATIC RELATIONSHIP MAPPING' : 'RELATIONSHIP MAPPING:'}
+            </span>
+            <span className={`text-sm font-semibold ${relationshipMappingActive ? 'text-green-600' : 'text-gray-400'}`}>
+              {relationshipMappingActive ? 'ACTIVE' : 'INACTIVE'}
+            </span>
+          </div>
+          <button
+            onClick={handleClear}
+            disabled={totalEntries === 0}
+            className="px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            CLEAR ALL
+          </button>
+        </div>
       </div>
 
-      {/* Hierarchical View */}
-      {viewMode === 'hierarchical' && (
-        <HierarchicalDataEntry />
-      )}
-
-      {/* Visual Builder View */}
-      {viewMode === 'visual' && (
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                </svg>
-                Visual Data Builder
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-gray-600 mb-4">
-                Drag objects from the sidebar to the canvas. Click on objects to edit their properties.
-                Use the &quot;Add Linked Entry&quot; button to create related objects with automatic reference linking.
-              </p>
+      {/* Main Content */}
+      <div className="flex-1 overflow-hidden">
+        {viewMode === 'hierarchical' ? (
+          <TableDataEntry />
+        ) : (
+          <div className="h-full p-6 overflow-y-auto">
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                  </svg>
+                  Visual Data Builder
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Drag objects from the sidebar to the canvas. Click on objects to edit their properties.
+                </p>
+              </div>
               <Suspense fallback={
-                <div className="h-[700px] flex items-center justify-center bg-gray-50 rounded-lg border border-gray-200">
+                <div className="h-[600px] flex items-center justify-center bg-gray-50">
                   <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
                     <p className="text-gray-600">Loading Visual Builder...</p>
@@ -246,47 +238,9 @@ export default function DataEntryPage() {
                   onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
                 />
               </Suspense>
-            </CardContent>
-          </Card>
-
-          {/* Summary for Visual Builder */}
-          {totalEntries > 0 && (
-            <Card className="bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200">
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-medium text-gray-700">
-                      Total Objects: <span className="text-purple-600 font-bold">{totalEntries}</span>
-                    </span>
-                    <span className="text-sm text-gray-500">|</span>
-                    <div className="flex items-center gap-2">
-                      {pipelineConfig.steps.slice(0, 5).map((step) => {
-                        const count = (state[step.id] || []).length;
-                        if (count === 0) return null;
-                        return (
-                          <Badge key={step.id} variant="default">
-                            {step.name}: {count}
-                          </Badge>
-                        );
-                      })}
-                      {pipelineConfig.steps.filter(s => (state[s.id] || []).length > 0).length > 5 && (
-                        <span className="text-xs text-gray-500">+more</span>
-                      )}
-                    </div>
-                  </div>
-                  <Button onClick={handleDeploy} disabled={totalEntries === 0}>
-                    Deploy to Salesforce
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Auto-save indicator */}
-      <div className="text-center text-sm text-gray-500">
-        Data is automatically saved to your browser. Use Export JSON to back up your work.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
