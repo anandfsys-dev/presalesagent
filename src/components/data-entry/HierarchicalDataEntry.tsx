@@ -181,6 +181,13 @@ function InlineEntryForm({
       const isInDropdown = activeElement?.getAttribute('role') === 'listbox' ||
                           activeElement?.closest('[role="listbox"]') !== null;
 
+      // Ctrl+Shift+Enter or Cmd+Shift+Enter - save and new (only for new records)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter' && isNew && onSaveAndNew) {
+        e.preventDefault();
+        onSaveAndNew(formData);
+        return;
+      }
+
       // Enter key - save (but not if in a select/dropdown)
       if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
         if (!isInSelect && !isInDropdown) {
@@ -198,7 +205,7 @@ function InlineEntryForm({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [formData, onSave, onCancel]);
+  }, [formData, onSave, onSaveAndNew, onCancel, isNew]);
 
   const handleChange = (name: string, value: unknown) => {
     const col = step.columns.find(c => c.name === name);
@@ -378,7 +385,9 @@ function InlineEntryForm({
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm font-semibold text-blue-600 uppercase tracking-wide">
             {isNew ? 'New Record' : 'Editing Record'}
-            <span className="ml-2 text-xs font-normal text-gray-400">(Enter to save, Esc to cancel)</span>
+            <span className="ml-2 text-xs font-normal text-gray-400">
+              (Enter: save{isNew && onSaveAndNew ? ', Ctrl+Shift+Enter: save & new' : ''}, Esc: cancel)
+            </span>
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -394,7 +403,7 @@ function InlineEntryForm({
               <button
                 onClick={handleSaveAndNew}
                 className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
-                title="Save and Add New"
+                title="Save and Add New (Ctrl+Shift+Enter)"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
