@@ -91,6 +91,7 @@ export default function DeploymentPage() {
   const [postDeploymentResults, setPostDeploymentResults] = useState<PostDeploymentResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [duplicateConflicts, setDuplicateConflicts] = useState<DuplicateConflict[]>([]);
+  const [missingRequiredFields, setMissingRequiredFields] = useState<MissingRequiredField[]>([]);
   const [result, setResult] = useState<{
     success: boolean;
     totalObjects: number;
