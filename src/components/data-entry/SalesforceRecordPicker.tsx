@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Button, Input } from '@/components/ui';
 
 interface SalesforceRecord {
@@ -32,6 +33,11 @@ export function SalesforceRecordPicker({
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(currentValue || null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Fetch records from Salesforce
   const fetchRecords = useCallback(async (search?: string) => {
@@ -94,7 +100,11 @@ export function SalesforceRecordPicker({
     onClose();
   };
 
-  return (
+  if (!isMounted) {
+    return null;
+  }
+
+  return createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
         {/* Header */}
@@ -198,6 +208,7 @@ export function SalesforceRecordPicker({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
