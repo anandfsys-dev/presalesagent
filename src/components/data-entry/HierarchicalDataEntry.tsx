@@ -106,6 +106,7 @@ function InlineEntryForm({
   parentRefField,
   parentId,
   onSave,
+  onSaveAndNew,
   onCancel,
   onDelete,
   connectionId,
@@ -117,6 +118,7 @@ function InlineEntryForm({
   parentRefField?: string;
   parentId?: string;
   onSave: (data: Record<string, unknown>) => void;
+  onSaveAndNew?: (data: Record<string, unknown>) => void;
   onCancel: () => void;
   onDelete?: () => void;
   connectionId?: string;
@@ -169,6 +171,12 @@ function InlineEntryForm({
 
   const handleSubmit = () => {
     onSave(formData);
+  };
+
+  const handleSaveAndNew = () => {
+    if (onSaveAndNew) {
+      onSaveAndNew(formData);
+    }
   };
 
   const handleExternalRefSelect = (colName: string, record: { id: string; name: string }) => {
@@ -328,6 +336,17 @@ function InlineEntryForm({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </button>
+            {isNew && onSaveAndNew && (
+              <button
+                onClick={handleSaveAndNew}
+                className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
+                title="Save and Add New"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+              </button>
+            )}
             {onDelete && !isNew && (
               <button
                 onClick={onDelete}
@@ -444,6 +463,7 @@ function ParentSection({
   connectionId,
   getReferenceOptions,
   onSaveChild,
+  onSaveAndNewChild,
   onCancelEdit,
 }: {
   parentStep: PipelineStep;
@@ -458,8 +478,10 @@ function ParentSection({
   connectionId?: string;
   getReferenceOptions: (stepId: string, col: ColumnDefinition) => { value: string; label: string }[];
   onSaveChild: (entryId: string | null, data: Record<string, unknown>) => void;
+  onSaveAndNewChild?: (data: Record<string, unknown>) => void;
   onCancelEdit: () => void;
 }) {
+  const [formKey, setFormKey] = useState(0);
   const parentName = getEntryDisplayName(parentEntry);
 
   // Get key fields for display (non-reference, non-hidden fields)
@@ -494,10 +516,15 @@ function ParentSection({
         {/* New entry form */}
         {editingEntryId === 'new' && (
           <InlineEntryForm
+            key={formKey}
             step={childStep}
             parentRefField={refField}
             parentId={parentEntry._id}
             onSave={(data) => onSaveChild(null, data)}
+            onSaveAndNew={onSaveAndNewChild ? (data) => {
+              onSaveAndNewChild(data);
+              setFormKey(k => k + 1);
+            } : undefined}
             onCancel={onCancelEdit}
             connectionId={connectionId}
             getReferenceOptions={getReferenceOptions}
@@ -552,6 +579,7 @@ function StepContent({
   addEntry,
   updateEntry,
   deleteEntry,
+  isAddingNew,
 }: {
   step: PipelineStep;
   entries: DataEntry[];
@@ -563,6 +591,7 @@ function StepContent({
   addEntry: (stepId: string, data: Record<string, unknown>) => string;
   updateEntry: (stepId: string, entryId: string, data: Record<string, unknown>) => void;
   deleteEntry: (stepId: string, entryId: string) => void;
+  isAddingNew?: boolean;
 }) {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [addingNewEntry, setAddingNewEntry] = useState(false);
@@ -643,6 +672,11 @@ function StepContent({
                 data[refField] = parentEntry._id;
                 handleSaveEntry(entryId, data);
               }}
+              onSaveAndNewChild={(data) => {
+                // Ensure parent reference is set and keep form open
+                data[refField] = parentEntry._id;
+                addEntry(step.id, data);
+              }}
               onCancelEdit={() => {
                 setEditingEntryId(null);
                 setEditingInParent(null);
@@ -669,7 +703,7 @@ function StepContent({
         />
       )}
 
-      {entries.length === 0 && !addingNewEntry && (
+      {entries.length === 0 && !addingNewEntry && !isAddingNew && (
         <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
           <svg className="w-12 h-12 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -725,6 +759,7 @@ export default function HierarchicalDataEntry({ connectionId }: HierarchicalData
     pipelineConfig.steps[0]?.id || ''
   );
   const [addingNewEntry, setAddingNewEntry] = useState(false);
+  const [formKey, setFormKey] = useState(0); // Used to reset form on Save and New
 
   // Get the selected step
   const selectedStep = useMemo(() =>
@@ -834,16 +869,22 @@ export default function HierarchicalDataEntry({ connectionId }: HierarchicalData
             addEntry={addEntry}
             updateEntry={updateEntry}
             deleteEntry={deleteEntry}
+            isAddingNew={addingNewEntry}
           />
 
           {/* New entry form for root objects */}
           {!parentInfo && addingNewEntry && (
             <div className="mt-4">
               <InlineEntryForm
+                key={formKey}
                 step={selectedStep}
                 onSave={(data) => {
                   addEntry(selectedStep.id, data);
                   setAddingNewEntry(false);
+                }}
+                onSaveAndNew={(data) => {
+                  addEntry(selectedStep.id, data);
+                  setFormKey(k => k + 1); // Reset form for new entry
                 }}
                 onCancel={() => setAddingNewEntry(false)}
                 connectionId={connectionId}
