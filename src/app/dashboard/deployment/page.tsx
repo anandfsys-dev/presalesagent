@@ -15,7 +15,7 @@ import {
   Select,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { useConfigData, DeploymentPayload } from '@/contexts/ConfigDataContext';
+import { useConfigData } from '@/contexts/ConfigDataContext';
 import { useUser } from '@/contexts/UserContext';
 import type { SalesforceConnection } from '@/types';
 
@@ -54,6 +54,20 @@ interface DeploymentLog {
   objectType?: string;
 }
 
+
+interface DuplicateConflict {
+  stepName: string;
+  sobjectName: string;
+  recordLabel: string;
+  matches: Array<{ Id: string; Name?: string }>;
+}
+
+interface MissingRequiredField {
+  stepName: string;
+  recordLabel: string;
+  fieldName: string;
+}
+
 interface CreatedRecord {
   stepId: string;
   stepName: string;
@@ -82,6 +96,8 @@ export default function DeploymentPage() {
   const [createdRecords, setCreatedRecords] = useState<CreatedRecord[]>([]);
   const [postDeploymentResults, setPostDeploymentResults] = useState<PostDeploymentResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateConflicts, setDuplicateConflicts] = useState<DuplicateConflict[]>([]);
+  const [missingRequiredFields, setMissingRequiredFields] = useState<MissingRequiredField[]>([]);
   const [result, setResult] = useState<{
     success: boolean;
     totalObjects: number;
@@ -132,6 +148,108 @@ export default function DeploymentPage() {
     ]);
   }, []);
 
+
+
+  const runRequiredFieldCheck = (): MissingRequiredField[] => {
+    const missing: MissingRequiredField[] = [];
+
+    for (const step of pipelineConfig.steps) {
+      const requiredColumns = step.columns.filter(col => col.required);
+      if (requiredColumns.length === 0) continue;
+
+      const entries = state[step.id] || [];
+      for (const entry of entries) {
+        const recordLabel = String((entry.Name as string) || (entry.Code as string) || entry._id);
+
+        for (const col of requiredColumns) {
+          const value = entry[col.name];
+          const isMissing = value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
+          if (isMissing) {
+            missing.push({
+              stepName: step.name,
+              recordLabel,
+              fieldName: col.name,
+            });
+          }
+        }
+      }
+    }
+
+    return missing;
+  };
+
+  const runDuplicateCheck = async (connectionId: string): Promise<DuplicateConflict[]> => {
+    const checks: Array<{
+      stepId: string;
+      stepName: string;
+      sobjectName: string;
+      recordLabel: string;
+      conditions: Array<{ field: string; value: string | number | boolean }>;
+    }> = [];
+
+    for (const step of pipelineConfig.steps) {
+      const keyColumns = step.columns.filter(col => col.isKey);
+      if (keyColumns.length === 0) continue;
+
+      const entries = state[step.id] || [];
+      for (const entry of entries) {
+        const conditions = keyColumns
+          .map(col => {
+            const value = entry[col.name] as string | number | boolean | null | undefined;
+            if (value === undefined || value === null || String(value).trim() === '') {
+              return null;
+            }
+            return {
+              field: col.sfField || col.name,
+              value,
+            };
+          })
+          .filter((c): c is { field: string; value: string | number | boolean } => Boolean(c));
+
+        if (conditions.length === 0) {
+          continue;
+        }
+
+        checks.push({
+          stepId: step.id,
+          stepName: step.name,
+          sobjectName: step.apiName,
+          recordLabel: String((entry.Name as string) || (entry.Code as string) || entry._id),
+          conditions,
+        });
+      }
+    }
+
+    if (checks.length === 0) {
+      return [];
+    }
+
+    const response = await fetch('/api/salesforce/duplicate-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId, checks }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to run duplicate check');
+    }
+
+    return (data.duplicates || []).map((d: {
+      stepName: string;
+      sobjectName: string;
+      recordLabel: string;
+      matches: Array<{ Id: string; Name?: string }>;
+    }) => ({
+      stepName: d.stepName,
+      sobjectName: d.sobjectName,
+      recordLabel: d.recordLabel,
+      matches: d.matches,
+    }));
+  };
+
   const handleStartDeployment = async () => {
     if (!connection) return;
 
@@ -141,9 +259,33 @@ export default function DeploymentPage() {
       return;
     }
 
-    setIsDeploying(true);
     setDeploymentComplete(false);
     setError(null);
+    setDuplicateConflicts([]);
+    setMissingRequiredFields([]);
+    setProgress(null);
+
+    const missingRequired = runRequiredFieldCheck();
+    if (missingRequired.length > 0) {
+      setMissingRequiredFields(missingRequired);
+      setError(`Required field validation failed for ${missingRequired.length} field value(s).`);
+      return;
+    }
+
+    try {
+      const duplicates = await runDuplicateCheck(connection.id);
+      if (duplicates.length > 0) {
+        setDuplicateConflicts(duplicates);
+        setError(`Duplicate records detected in Salesforce for ${duplicates.length} row(s). Resolve them before deployment.`);
+        return;
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed duplicate check';
+      setError(errorMessage);
+      return;
+    }
+
+    setIsDeploying(true);
     setLogs([]);
     setCreatedRecords([]);
     setPostDeploymentResults([]);
@@ -604,6 +746,41 @@ export default function DeploymentPage() {
       )}
 
       {/* Error Alert */}
+
+
+      {missingRequiredFields.length > 0 && (
+        <Alert variant="warning" title="Missing Required Fields" onClose={() => setMissingRequiredFields([])}>
+          <div className="space-y-2">
+            <p className="text-sm">Deployment is blocked until required fields are populated in Data Entry.</p>
+            <ul className="list-disc pl-5 space-y-1 text-sm max-h-52 overflow-auto">
+              {missingRequiredFields.map((item, idx) => (
+                <li key={`${item.stepName}-${item.recordLabel}-${item.fieldName}-${idx}`}>
+                  <span className="font-medium">{item.stepName}</span> / {item.recordLabel} / missing: {item.fieldName}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Alert>
+      )}
+
+      {duplicateConflicts.length > 0 && (
+        <Alert variant="warning" title="Duplicate Records Found in Salesforce" onClose={() => setDuplicateConflicts([])}>
+          <div className="space-y-2">
+            <p className="text-sm">Deployment is blocked until duplicate key values are fixed.</p>
+            <ul className="list-disc pl-5 space-y-1 text-sm max-h-52 overflow-auto">
+              {duplicateConflicts.map((dup, idx) => (
+                <li key={`${dup.stepName}-${dup.recordLabel}-${idx}`}>
+                  <span className="font-medium">{dup.stepName}</span> / {dup.sobjectName} / {dup.recordLabel}
+                  {dup.matches.length > 0 && (
+                    <span> → existing: {dup.matches.map(m => `${m.Name || 'Unnamed'} (${m.Id})`).join(', ')}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Alert>
+      )}
+
       {error && (
         <Alert variant="error" title="Deployment Error" onClose={() => setError(null)}>
           {error}
