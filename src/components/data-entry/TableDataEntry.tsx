@@ -563,7 +563,7 @@ function DataTable({
                 key={col.name}
                 className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
               >
-                {col.name.replace(/_/g, ' ')}
+                {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
               </th>
             ))}
             <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -922,7 +922,7 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
                           key={col.name}
                           className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
                         >
-                          {col.name.replace(/_/g, ' ')}
+                          {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
                         </th>
                       ))}
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">

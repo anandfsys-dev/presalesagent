@@ -62,6 +62,12 @@ interface DuplicateConflict {
   matches: Array<{ Id: string; Name?: string }>;
 }
 
+interface MissingRequiredField {
+  stepName: string;
+  recordLabel: string;
+  fieldName: string;
+}
+
 interface CreatedRecord {
   stepId: string;
   stepName: string;
@@ -142,6 +148,38 @@ export default function DeploymentPage() {
     ]);
   }, []);
 
+
+
+  const runRequiredFieldCheck = (): MissingRequiredField[] => {
+    const missing: MissingRequiredField[] = [];
+
+    for (const step of pipelineConfig.steps) {
+      const requiredColumns = step.columns.filter(col => col.required);
+      if (requiredColumns.length === 0) continue;
+
+      const entries = state[step.id] || [];
+      for (const entry of entries) {
+        const recordLabel = String((entry.Name as string) || (entry.Code as string) || entry._id);
+
+        for (const col of requiredColumns) {
+          const primaryValue = entry[col.name];
+          const sfFieldValue = col.sfField ? entry[col.sfField] : undefined;
+          const value = primaryValue ?? sfFieldValue;
+          const isMissing = value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
+          if (isMissing) {
+            missing.push({
+              stepName: step.name,
+              recordLabel,
+              fieldName: col.name,
+            });
+          }
+        }
+      }
+    }
+
+    return missing;
+  };
 
   const runDuplicateCheck = async (connectionId: string): Promise<DuplicateConflict[]> => {
     const checks: Array<{
@@ -226,6 +264,16 @@ export default function DeploymentPage() {
     setDeploymentComplete(false);
     setError(null);
     setDuplicateConflicts([]);
+    setMissingRequiredFields([]);
+    setProgress(null);
+
+    const missingRequired = runRequiredFieldCheck();
+    if (missingRequired.length > 0) {
+      setMissingRequiredFields(missingRequired);
+      setError(`Required field validation failed for ${missingRequired.length} field value(s).`);
+      return;
+    }
+
     setProgress(null);
 
     try {
@@ -702,6 +750,22 @@ export default function DeploymentPage() {
       )}
 
       {/* Error Alert */}
+
+
+      {missingRequiredFields.length > 0 && (
+        <Alert variant="warning" title="Missing Required Fields" onClose={() => setMissingRequiredFields([])}>
+          <div className="space-y-2">
+            <p className="text-sm">Deployment is blocked until required fields are populated in Data Entry.</p>
+            <ul className="list-disc pl-5 space-y-1 text-sm max-h-52 overflow-auto">
+              {missingRequiredFields.map((item, idx) => (
+                <li key={`${item.stepName}-${item.recordLabel}-${item.fieldName}-${idx}`}>
+                  <span className="font-medium">{item.stepName}</span> / {item.recordLabel} / missing: {item.fieldName}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Alert>
+      )}
 
       {duplicateConflicts.length > 0 && (
         <Alert variant="warning" title="Duplicate Records Found in Salesforce" onClose={() => setDuplicateConflicts([])}>
