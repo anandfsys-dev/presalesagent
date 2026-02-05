@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Node } from '@xyflow/react';
-import { Button } from '@/components/ui';
+import { Button, useConfirmDialog } from '@/components/ui';
 import { createClient } from '@/lib/supabase/client';
 import type { PipelineStep, SalesforceConnection, ColumnDefinition } from '@/types';
 
@@ -28,6 +28,7 @@ export function NodeConfigPanel({
   onClose,
 }: NodeConfigPanelProps) {
   const supabase = createClient();
+  const { confirm } = useConfirmDialog();
   const [label, setLabel] = useState(node.data.label as string);
   const [apiName, setApiName] = useState(node.data.apiName as string);
   const [worksheetName, setWorksheetName] = useState(node.data.worksheetName as string);
@@ -447,8 +448,15 @@ export function NodeConfigPanel({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              if (confirm('Are you sure you want to delete this object?')) {
+            onClick={async () => {
+              const confirmed = await confirm({
+                title: 'Delete Object',
+                message: 'Are you sure you want to delete this object? This will remove it from the pipeline configuration.',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                variant: 'danger',
+              });
+              if (confirmed) {
                 onDelete(node.id);
               }
             }}

@@ -8,10 +8,11 @@ import {
   CardTitle,
   CardContent,
   Button,
-  Alert,
   Badge,
 } from '@/components/ui';
 import { useConfigData, ExportData } from '@/contexts/ConfigDataContext';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirmDialog } from '@/components/ui/ConfirmDialog';
 import HierarchicalDataEntry from '@/components/data-entry/HierarchicalDataEntry';
 
 // Lazy load the Visual Data Builder to avoid SSR issues with React Flow
@@ -33,9 +34,10 @@ export default function DataEntryPage() {
     isHydrated,
   } = useConfigData();
 
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('hierarchical');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const toast = useToast();
+  const { confirm } = useConfirmDialog();
 
   const totalEntries = getTotalEntryCount();
 
@@ -43,10 +45,18 @@ export default function DataEntryPage() {
     router.push('/dashboard/deployment');
   };
 
-  const handleClear = () => {
-    if (confirm('Are you sure you want to clear all data? This cannot be undone.')) {
+  const handleClear = async () => {
+    const confirmed = await confirm({
+      title: 'Clear All Data',
+      message: 'Are you sure you want to clear all data? This action cannot be undone.',
+      confirmText: 'Clear All',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       clearAll();
-      setStatusMessage({ type: 'success', message: 'All data cleared successfully.' });
+      toast.success('All data cleared successfully.');
     }
   };
 
@@ -59,7 +69,7 @@ export default function DataEntryPage() {
     a.download = `salesforce-config-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setStatusMessage({ type: 'success', message: 'Data exported successfully.' });
+    toast.success('Data exported successfully.');
   };
 
   const handleImportJSON = () => {
@@ -90,15 +100,9 @@ export default function DataEntryPage() {
         }
       }
 
-      setStatusMessage({
-        type: 'success',
-        message: `Successfully imported ${count} entries from ${file.name}`,
-      });
+      toast.success(`Successfully imported ${count} entries from ${file.name}`);
     } catch (error) {
-      setStatusMessage({
-        type: 'error',
-        message: `Failed to import: ${error instanceof Error ? error.message : 'Invalid JSON file'}`,
-      });
+      toast.error(`Failed to import: ${error instanceof Error ? error.message : 'Invalid JSON file'}`);
     }
 
     // Reset file input
@@ -170,15 +174,6 @@ export default function DataEntryPage() {
           </Button>
         </div>
       </div>
-
-      {statusMessage && (
-        <Alert
-          variant={statusMessage.type === 'error' ? 'error' : 'success'}
-          onClose={() => setStatusMessage(null)}
-        >
-          {statusMessage.message}
-        </Alert>
-      )}
 
       {/* View Mode Tabs */}
       <div className="border-b border-gray-200">

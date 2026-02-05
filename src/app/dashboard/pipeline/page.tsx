@@ -2,11 +2,12 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Card, CardHeader, CardTitle, CardContent, Button, Alert, Input } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardContent, Button, Input, useConfirmDialog } from '@/components/ui';
 import { PipelineEditor } from '@/components/pipeline';
 import { DEFAULT_PIPELINE_CONFIG, validatePipelineConfig } from '@/lib/pipeline/config';
 import { downloadAllTemplates, downloadCSV, generateCSVTemplates } from '@/lib/csv/generator';
 import { useConfigData } from '@/contexts/ConfigDataContext';
+import { useToast } from '@/contexts/ToastContext';
 import type { PipelineConfig, PostDeploymentOperation } from '@/types';
 
 type TabType = 'editor' | 'summary' | 'postDeployment';
@@ -16,10 +17,12 @@ function PostDeploymentSection({
   operations,
   onUpdate,
   onSave,
+  onConfirm,
 }: {
   operations: PostDeploymentOperation[];
   onUpdate: (operations: PostDeploymentOperation[]) => void;
   onSave: () => void;
+  onConfirm: (options: { title: string; message: string; confirmText?: string; cancelText?: string; variant?: 'danger' | 'warning' | 'info' }) => Promise<boolean>;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<PostDeploymentOperation>>({});
@@ -36,8 +39,16 @@ function PostDeploymentSection({
     onUpdate([...operations, newOp]);
   };
 
-  const handleDeleteOperation = (id: string) => {
-    if (confirm('Are you sure you want to delete this operation?')) {
+  const handleDeleteOperation = async (id: string) => {
+    const confirmed = await onConfirm({
+      title: 'Delete Operation',
+      message: 'Are you sure you want to delete this operation?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       const updated = operations.filter(op => op.id !== id)
         .map((op, index) => ({ ...op, order: index + 1 }));
       onUpdate(updated);
@@ -318,11 +329,12 @@ function PostDeploymentSection({
 export default function PipelinePage() {
   const supabase = createClient();
   const { pipelineConfig: contextConfig, updatePipelineConfig, migrateDataForColumnChanges, refreshPipelineConfig } = useConfigData();
+  const toast = useToast();
+  const { confirm } = useConfirmDialog();
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_PIPELINE_CONFIG);
   const [previousConfig, setPreviousConfig] = useState<PipelineConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('editor');
   const [changedSteps, setChangedSteps] = useState<string[]>([]);
@@ -363,16 +375,12 @@ export default function PipelinePage() {
 
   const handleSave = useCallback(async (newConfig: PipelineConfig) => {
     setSaving(true);
-    setMessage(null);
 
     try {
       // Validate config
       const validation = validatePipelineConfig(newConfig);
       if (!validation.valid) {
-        setMessage({
-          type: 'error',
-          text: `Validation errors: ${validation.errors.join(', ')}`,
-        });
+        toast.error(`Validation errors: ${validation.errors.join(', ')}`);
         return;
       }
 
@@ -417,12 +425,9 @@ export default function PipelinePage() {
       const migrated = migrateDataForColumnChanges(config, newConfig);
       if (migrated.length > 0) {
         setChangedSteps(migrated);
-        setMessage({
-          type: 'success',
-          text: `Pipeline configuration saved. Data migrated for: ${migrated.join(', ')}`,
-        });
+        toast.success(`Pipeline configuration saved. Data migrated for: ${migrated.join(', ')}`);
       } else {
-        setMessage({ type: 'success', text: 'Pipeline configuration saved successfully' });
+        toast.success('Pipeline configuration saved successfully');
       }
 
       // Update context and local state
@@ -431,14 +436,11 @@ export default function PipelinePage() {
       updatePipelineConfig(newConfig);
     } catch (error) {
       console.error('Error saving config:', error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to save configuration',
-      });
+      toast.error(error instanceof Error ? error.message : 'Failed to save configuration');
     } finally {
       setSaving(false);
     }
-  }, [supabase, config, migrateDataForColumnChanges, updatePipelineConfig]);
+  }, [supabase, config, migrateDataForColumnChanges, updatePipelineConfig, toast]);
 
   const handleGenerateCSV = useCallback((currentConfig: PipelineConfig) => {
     setShowDownloadOptions(true);
@@ -448,7 +450,7 @@ export default function PipelinePage() {
   const handleDownloadAll = () => {
     downloadAllTemplates(config);
     setShowDownloadOptions(false);
-    setMessage({ type: 'success', text: 'CSV templates downloaded successfully' });
+    toast.success('CSV templates downloaded successfully');
   };
 
   const handleDownloadSingle = (worksheetName: string) => {
@@ -460,10 +462,18 @@ export default function PipelinePage() {
     }
   };
 
-  const handleResetToDefault = () => {
-    if (confirm('Are you sure you want to reset to the default configuration? This will overwrite your changes.')) {
+  const handleResetToDefault = async () => {
+    const confirmed = await confirm({
+      title: 'Reset Configuration',
+      message: 'Are you sure you want to reset to the default configuration? This will overwrite your changes.',
+      confirmText: 'Reset',
+      cancelText: 'Cancel',
+      variant: 'warning',
+    });
+
+    if (confirmed) {
       setConfig(DEFAULT_PIPELINE_CONFIG);
-      setMessage({ type: 'warning', text: 'Configuration reset to default. Click "Save Configuration" to persist.' });
+      toast.warning('Configuration reset to default. Click "Save Configuration" to persist.');
     }
   };
 
@@ -483,8 +493,8 @@ export default function PipelinePage() {
 
     const newConfig = { ...config, steps: newSteps };
     setConfig(newConfig);
-    setMessage({ type: 'warning', text: 'Step order changed. Click "Save" to persist changes.' });
-  }, [config]);
+    toast.info('Step order changed. Click "Save" to persist changes.');
+  }, [config, toast]);
 
   const handleSaveReorder = useCallback(async () => {
     await handleSave(config);
@@ -514,16 +524,6 @@ export default function PipelinePage() {
           </Button>
         </div>
       </div>
-
-      {/* Messages */}
-      {message && (
-        <Alert
-          variant={message.type}
-          onClose={() => setMessage(null)}
-        >
-          {message.text}
-        </Alert>
-      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
@@ -789,6 +789,7 @@ export default function PipelinePage() {
             setConfig(newConfig);
           }}
           onSave={() => handleSave(config)}
+          onConfirm={confirm}
         />
       )}
 

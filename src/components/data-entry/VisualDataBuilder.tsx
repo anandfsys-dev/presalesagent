@@ -21,7 +21,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useConfigData, DataEntry } from '@/contexts/ConfigDataContext';
-import { Card, CardHeader, CardTitle, CardContent, Button, Input, Select, Badge } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardContent, Button, Input, Select, Badge, useConfirmDialog } from '@/components/ui';
 import { SalesforceRecordPicker } from './SalesforceRecordPicker';
 import type { PipelineStep, ColumnDefinition } from '@/types';
 
@@ -543,6 +543,7 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
     deleteEntry,
     getReferenceOptions,
   } = useConfigData();
+  const { confirm } = useConfirmDialog();
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
@@ -618,11 +619,19 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
   }, []);
 
   // Handle delete
-  const handleDelete = useCallback((entryId: string, stepId: string) => {
-    if (confirm('Are you sure you want to delete this entry?')) {
+  const handleDelete = useCallback(async (entryId: string, stepId: string) => {
+    const confirmed = await confirm({
+      title: 'Delete Entry',
+      message: 'Are you sure you want to delete this entry? This action cannot be undone.',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       deleteEntry(stepId, entryId);
     }
-  }, [deleteEntry]);
+  }, [deleteEntry, confirm]);
 
   // Handle add child entry
   const handleAddChild = useCallback((parentEntry: DataEntry, parentStep: PipelineStep, childStepId: string, refField: string) => {

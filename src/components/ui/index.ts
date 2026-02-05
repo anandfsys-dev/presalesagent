@@ -8,3 +8,6 @@ export { Alert } from './Alert';
 export { Spinner, LoadingOverlay } from './Spinner';
 export { ProgressBar } from './ProgressBar';
 export { Tabs, TabsList, TabsTrigger, TabsContent } from './Tabs';
+export { ToastContainer } from './Toast';
+export type { ToastData, ToastVariant } from './Toast';
+export { ConfirmDialog, ConfirmDialogProvider, useConfirmDialog } from './ConfirmDialog';

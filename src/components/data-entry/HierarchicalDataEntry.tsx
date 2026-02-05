@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useConfigData, DataEntry } from '@/contexts/ConfigDataContext';
-import { Button, Badge, Input, Select } from '@/components/ui';
+import { Button, Badge, Input, Select, useConfirmDialog } from '@/components/ui';
 import { SalesforceRecordPicker } from './SalesforceRecordPicker';
 import type { PipelineStep, ColumnDefinition } from '@/types';
 
@@ -597,6 +597,7 @@ function StepContent({
   const [addingNewEntry, setAddingNewEntry] = useState(false);
   // Track which parent section is adding/editing
   const [editingInParent, setEditingInParent] = useState<string | null>(null);
+  const { confirm } = useConfirmDialog();
 
   // Get key fields for display (non-reference fields after Name/Code)
   const keyFields = step.columns.filter(col =>
@@ -617,8 +618,16 @@ function StepContent({
     setEditingInParent(null);
   };
 
-  const handleDeleteEntry = (entryId: string) => {
-    if (confirm('Are you sure you want to delete this entry?')) {
+  const handleDeleteEntry = async (entryId: string) => {
+    const confirmed = await confirm({
+      title: 'Delete Entry',
+      message: 'Are you sure you want to delete this entry? This action cannot be undone.',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       deleteEntry(step.id, entryId);
       setEditingEntryId(null);
     }
