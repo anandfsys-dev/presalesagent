@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useConfigData, DataEntry } from '@/contexts/ConfigDataContext';
 import { Button, Badge, Input, Select, useConfirmDialog } from '@/components/ui';
 import { SalesforceRecordPicker } from './SalesforceRecordPicker';
@@ -149,6 +149,56 @@ function InlineEntryForm({
   const [userModifiedFields, setUserModifiedFields] = useState<Set<string>>(new Set());
   const [pickerColumn, setPickerColumn] = useState<ColumnDefinition | null>(null);
   const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>({});
+  const formRef = useRef<HTMLDivElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus the first input field when the form mounts
+  useEffect(() => {
+    // Small delay to ensure the DOM is ready
+    const timer = setTimeout(() => {
+      if (firstInputRef.current) {
+        firstInputRef.current.focus();
+        firstInputRef.current.select();
+      } else if (formRef.current) {
+        // Fallback: find the first input/select in the form
+        const firstInput = formRef.current.querySelector('input, select') as HTMLElement;
+        if (firstInput) {
+          firstInput.focus();
+        }
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if this form is focused (active element is within the form)
+      if (!formRef.current?.contains(document.activeElement)) return;
+
+      const activeElement = document.activeElement;
+      const isInSelect = activeElement?.tagName === 'SELECT';
+      const isInDropdown = activeElement?.getAttribute('role') === 'listbox' ||
+                          activeElement?.closest('[role="listbox"]') !== null;
+
+      // Enter key - save (but not if in a select/dropdown)
+      if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        if (!isInSelect && !isInDropdown) {
+          e.preventDefault();
+          onSave(formData);
+        }
+      }
+
+      // Escape key - cancel
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [formData, onSave, onCancel]);
 
   const handleChange = (name: string, value: unknown) => {
     const col = step.columns.find(c => c.name === name);
@@ -191,7 +241,7 @@ function InlineEntryForm({
     return true;
   });
 
-  const renderField = (col: ColumnDefinition) => {
+  const renderField = (col: ColumnDefinition, isFirst: boolean) => {
     const value = formData[col.name];
 
     switch (col.type) {
@@ -203,6 +253,7 @@ function InlineEntryForm({
             </label>
             <div className="flex gap-1">
               <input
+                ref={isFirst ? firstInputRef : undefined}
                 type="text"
                 value={(value as string) || ''}
                 onChange={(e) => handleChange(col.name, e.target.value)}
@@ -293,6 +344,7 @@ function InlineEntryForm({
               {col.name.replace(/_/g, ' ')}{col.required && '*'}
             </label>
             <input
+              ref={isFirst ? firstInputRef : undefined}
               type="number"
               value={(value as number) ?? ''}
               onChange={(e) => handleChange(col.name, e.target.value ? Number(e.target.value) : null)}
@@ -309,6 +361,7 @@ function InlineEntryForm({
               {col.name.replace(/_/g, ' ')}{col.required && '*'}
             </label>
             <input
+              ref={isFirst ? firstInputRef : undefined}
               type="text"
               value={(value as string) || ''}
               onChange={(e) => handleChange(col.name, e.target.value)}
@@ -321,16 +374,17 @@ function InlineEntryForm({
 
   return (
     <>
-      <div className="border-2 border-blue-400 rounded-xl p-4 bg-blue-50/30">
+      <div ref={formRef} className="border-2 border-blue-400 rounded-xl p-4 bg-blue-50/30">
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm font-semibold text-blue-600 uppercase tracking-wide">
             {isNew ? 'New Record' : 'Editing Record'}
+            <span className="ml-2 text-xs font-normal text-gray-400">(Enter to save, Esc to cancel)</span>
           </span>
           <div className="flex items-center gap-2">
             <button
               onClick={handleSubmit}
               className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
-              title="Save"
+              title="Save (Enter)"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -361,7 +415,7 @@ function InlineEntryForm({
             <button
               onClick={onCancel}
               className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
-              title="Cancel"
+              title="Cancel (Esc)"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -370,7 +424,7 @@ function InlineEntryForm({
           </div>
         </div>
         <div className="flex flex-wrap gap-4">
-          {visibleColumns.map(renderField)}
+          {visibleColumns.map((col, index) => renderField(col, index === 0))}
         </div>
       </div>
 
@@ -826,6 +880,20 @@ export default function HierarchicalDataEntry({ connectionId }: HierarchicalData
     }
   }, [selectedStep, pipelineConfig.steps]);
 
+  // Handle Ctrl+Enter to add new entry (only for root objects without parent)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Enter or Cmd+Enter to add new entry
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !parentInfo && !addingNewEntry) {
+        e.preventDefault();
+        setAddingNewEntry(true);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [parentInfo, addingNewEntry]);
+
   if (!selectedStep) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -859,6 +927,7 @@ export default function HierarchicalDataEntry({ connectionId }: HierarchicalData
             <Button
               onClick={() => setAddingNewEntry(true)}
               className="bg-blue-600 hover:bg-blue-700 text-white"
+              title="Add Entry (Ctrl+Enter)"
             >
               + Add Entry
             </Button>
