@@ -732,25 +732,32 @@ export default function HierarchicalDataEntry({ connectionId }: HierarchicalData
     [pipelineConfig.steps, selectedStepId]
   );
 
-  // Find primary parent for the selected step (first reference column with referenceTo)
+  // Find primary parent for the selected step (only if reference field is REQUIRED)
+  // Objects with optional references should appear as root-level with a dropdown
   const parentInfo = useMemo(() => {
     if (!selectedStep) return null;
 
     // Look for primary parent through parentIdMappings first
+    // But only if the corresponding column is required
     if (selectedStep.parentIdMappings && selectedStep.parentIdMappings.length > 0) {
       const primaryMapping = selectedStep.parentIdMappings[0];
-      const parentStep = pipelineConfig.steps.find(s => s.id === primaryMapping.parentStep);
-      if (parentStep) {
-        return {
-          parentStep,
-          refField: primaryMapping.field,
-        };
+      // Find the corresponding column to check if it's required
+      const refColumn = selectedStep.columns.find(col => col.name === primaryMapping.field);
+      // Only treat as parent-child if the reference is required
+      if (refColumn && refColumn.required === true) {
+        const parentStep = pipelineConfig.steps.find(s => s.id === primaryMapping.parentStep);
+        if (parentStep) {
+          return {
+            parentStep,
+            refField: primaryMapping.field,
+          };
+        }
       }
     }
 
-    // Fall back to finding reference column
+    // Fall back to finding reference column - only if it's REQUIRED
     const refColumn = selectedStep.columns.find(col =>
-      col.type === 'reference' && col.referenceTo
+      col.type === 'reference' && col.referenceTo && col.required === true
     );
     if (refColumn && refColumn.referenceTo) {
       const parentStep = pipelineConfig.steps.find(s => s.id === refColumn.referenceTo);
