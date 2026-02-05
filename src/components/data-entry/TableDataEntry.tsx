@@ -146,6 +146,7 @@ function TableRow({
   const [userModifiedFields, setUserModifiedFields] = useState<Set<string>>(new Set());
   const [pickerColumn, setPickerColumn] = useState<ColumnDefinition | null>(null);
   const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>({});
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const rowRef = useRef<HTMLTableRowElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
 
@@ -174,13 +175,13 @@ function TableRow({
 
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter' && isNew && onSaveAndNew) {
         e.preventDefault();
-        onSaveAndNew(formData);
+        handleSaveAndNewClick();
         return;
       }
 
       if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isInSelect) {
         e.preventDefault();
-        onSave(formData);
+        handleSaveClick();
       }
 
       if (e.key === 'Escape') {
@@ -194,6 +195,12 @@ function TableRow({
   }, [formData, onSave, onSaveAndNew, onCancel, isNew, isEditing]);
 
   const handleChange = (name: string, value: unknown) => {
+    setValidationErrors(prev => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     const col = step.columns.find(c => c.name === name);
     if (col?.autogenerate) {
       setUserModifiedFields(prev => new Set(prev).add(name));
@@ -216,6 +223,42 @@ function TableRow({
     handleChange(colName, record.id);
     setExternalRefNames(prev => ({ ...prev, [colName]: record.name }));
     setPickerColumn(null);
+  };
+
+
+  const isValueMissing = (value: unknown) => {
+    if (value === undefined || value === null) return true;
+    if (typeof value === 'string') return value.trim() === '';
+    return false;
+  };
+
+  const validateRequiredFields = () => {
+    const errors: Record<string, string> = {};
+    for (const col of step.columns) {
+      if (!col.required) continue;
+      if (parentRefField && col.name === parentRefField && parentId) continue;
+      const value = formData[col.name];
+      if (isValueMissing(value)) {
+        errors[col.name] = `${col.name} is required`;
+      }
+    }
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSaveClick = () => {
+    if (!validateRequiredFields()) {
+      return;
+    }
+    onSave(formData);
+  };
+
+  const handleSaveAndNewClick = () => {
+    if (!onSaveAndNew) return;
+    if (!validateRequiredFields()) {
+      return;
+    }
+    onSaveAndNew(formData);
   };
 
   const renderCell = (col: ColumnDefinition, isFirst: boolean) => {
@@ -265,7 +308,7 @@ function TableRow({
                 value={(value as string) || ''}
                 onChange={(e) => handleChange(col.name, e.target.value)}
                 placeholder={`${col.externalSobject || 'SF'} ID`}
-                className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm font-mono focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full px-2 py-1.5 border rounded text-sm font-mono focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${validationErrors[col.name] ? 'border-red-500' : 'border-gray-300'}`}
               />
               <button
                 type="button"
@@ -289,7 +332,7 @@ function TableRow({
             <select
               value={(value as string) || ''}
               onChange={(e) => handleChange(col.name, e.target.value)}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+              className={`w-full px-2 py-1.5 border rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white ${validationErrors[col.name] ? 'border-red-500' : 'border-gray-300'}`}
             >
               <option value="">Select...</option>
               {options.map(opt => (
@@ -306,7 +349,7 @@ function TableRow({
             <select
               value={(value as string) || String(col.defaultValue || '')}
               onChange={(e) => handleChange(col.name, e.target.value)}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+              className={`w-full px-2 py-1.5 border rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white ${validationErrors[col.name] ? 'border-red-500' : 'border-gray-300'}`}
             >
               <option value="">Select...</option>
               {(col.picklistValues || []).map(v => (
@@ -338,7 +381,7 @@ function TableRow({
               value={(value as number) ?? ''}
               onChange={(e) => handleChange(col.name, e.target.value ? Number(e.target.value) : null)}
               step={col.type === 'currency' ? '0.01' : '1'}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              className={`w-full px-2 py-1.5 border rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${validationErrors[col.name] ? 'border-red-500' : 'border-gray-300'}`}
             />
           </td>
         );
@@ -351,7 +394,7 @@ function TableRow({
               type="text"
               value={(value as string) || ''}
               onChange={(e) => handleChange(col.name, e.target.value)}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              className={`w-full px-2 py-1.5 border rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${validationErrors[col.name] ? 'border-red-500' : 'border-gray-300'}`}
             />
           </td>
         );
@@ -361,7 +404,7 @@ function TableRow({
   if (!isEditing && entry) {
     // Display row
     return (
-      <tr className="hover:bg-gray-50 border-b border-gray-100">
+      <tr className="hover:bg-gray-50 border-b border-gray-100" onDoubleClick={onStartEdit}>
         {visibleColumns.map((col, index) => renderCell(col, index === 0))}
         <td className="px-4 py-3 whitespace-nowrap text-right">
           <div className="flex items-center justify-end gap-1">
@@ -397,7 +440,7 @@ function TableRow({
         <td className="px-4 py-2 whitespace-nowrap text-right">
           <div className="flex items-center justify-end gap-1">
             <button
-              onClick={() => onSave(formData)}
+              onClick={handleSaveClick}
               className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 transition-colors"
               title="Save (Enter)"
             >
@@ -413,6 +456,14 @@ function TableRow({
           </div>
         </td>
       </tr>
+
+      {Object.keys(validationErrors).length > 0 && (
+        <tr className="bg-red-50 border-b border-red-100">
+          <td colSpan={visibleColumns.length + 1} className="px-4 py-2 text-xs text-red-700">
+            Please fill required fields: {Object.values(validationErrors).join(', ')}
+          </td>
+        </tr>
+      )}
 
       {/* Salesforce Record Picker Modal */}
       {pickerColumn && connectionId && pickerColumn.externalSobject && (
@@ -512,7 +563,7 @@ function DataTable({
                 key={col.name}
                 className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
               >
-                {col.name.replace(/_/g, ' ')}
+                {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
               </th>
             ))}
             <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -871,7 +922,7 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
                           key={col.name}
                           className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
                         >
-                          {col.name.replace(/_/g, ' ')}
+                          {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
                         </th>
                       ))}
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
