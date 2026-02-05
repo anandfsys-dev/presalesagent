@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useState, useRef, Suspense, lazy } from 'react';
+import React, { useState, useRef, Suspense, lazy, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Badge } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useConfigData, ExportData } from '@/contexts/ConfigDataContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useUser } from '@/contexts/UserContext';
 import TableDataEntry from '@/components/data-entry/TableDataEntry';
+import { createClient } from '@/lib/supabase/client';
 
 // Lazy load the Visual Data Builder to avoid SSR issues with React Flow
 const VisualDataBuilder = lazy(() => import('@/components/data-entry/VisualDataBuilder'));
@@ -17,11 +17,10 @@ type ViewMode = 'hierarchical' | 'visual';
 
 export default function DataEntryPage() {
   const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useUser();
   const {
-    state,
-    pipelineConfig,
     getTotalEntryCount,
     clearAll,
     exportData,
@@ -31,11 +30,43 @@ export default function DataEntryPage() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('hierarchical');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [relationshipMappingActive, setRelationshipMappingActive] = useState(true);
+  const relationshipMappingActive = true;
+  const [connectionId, setConnectionId] = useState<string>('');
   const toast = useToast();
   const { confirm } = useConfirmDialog();
 
   const totalEntries = getTotalEntryCount();
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchDefaultConnection = async () => {
+      const { data, error } = await supabase
+        .from('connections')
+        .select('id')
+        .eq('status', 'active')
+        .order('is_default', { ascending: false })
+        .order('name', { ascending: true })
+        .limit(1);
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error || !data || data.length === 0) {
+        setConnectionId('');
+        return;
+      }
+
+      setConnectionId(data[0].id);
+    };
+
+    fetchDefaultConnection();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [supabase]);
 
   const handleDeploy = () => {
     router.push('/dashboard/deployment');
@@ -210,7 +241,7 @@ export default function DataEntryPage() {
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
         {viewMode === 'hierarchical' ? (
-          <TableDataEntry />
+          <TableDataEntry connectionId={connectionId} />
         ) : (
           <div className="h-full p-6 overflow-y-auto">
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -236,6 +267,7 @@ export default function DataEntryPage() {
                 <VisualDataBuilder
                   isFullscreen={isFullscreen}
                   onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+                  connectionId={connectionId}
                 />
               </Suspense>
             </div>
