@@ -274,6 +274,8 @@ export default function DeploymentPage() {
       return;
     }
 
+    setProgress(null);
+
     try {
       const duplicates = await runDuplicateCheck(connection.id);
       if (duplicates.length > 0) {
