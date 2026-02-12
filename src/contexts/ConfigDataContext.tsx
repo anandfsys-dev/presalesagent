@@ -11,6 +11,7 @@ const STORAGE_KEY = 'salesforce-rca-config-data';
 export interface DataEntry {
   _id: string;
   _stepId: string;
+  _sfNames?: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -153,9 +154,10 @@ interface ConfigDataContextType {
   exportData: () => ExportData;
   getStepConfig: (stepId: string) => PipelineStep | undefined;
   getReferenceOptions: (stepId: string, column: ColumnDefinition) => { value: string; label: string }[];
+  getAllowedSalesforceIds: (column: ColumnDefinition) => Set<string> | null | undefined;
   getTotalEntryCount: () => number;
   getEntryCountByStep: (stepId: string) => number;
-  convertToDeploymentPayload: () => DeploymentPayload;
+  convertToDeploymentPayload: (apiVersion?: string) => DeploymentPayload;
   isHydrated: boolean;
   refreshPipelineConfig: () => Promise<void>;
   updatePipelineConfig: (newConfig: PipelineConfig) => void;
@@ -173,6 +175,8 @@ export interface DeploymentPayload {
     endpoint: string;
     method: string;
     entries: Record<string, unknown>[];
+    ignoredFields?: string[];
+    requiresInactivationBeforeDelete?: boolean;
   }[];
   postDeploymentOperations: {
     id: string;
@@ -461,6 +465,25 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     }));
   }, [state, pipelineConfig]);
 
+  // Get allowed Salesforce IDs for cross-step filtering
+  // Returns undefined = no filter configured, null = filter configured but no entries, Set = allowed IDs
+  const getAllowedSalesforceIds = useCallback((column: ColumnDefinition): Set<string> | null | undefined => {
+    if (!column.filterByStep || !column.filterByColumn) return undefined;
+
+    const sourceEntries = state[column.filterByStep];
+    if (!sourceEntries || sourceEntries.length === 0) return null;
+
+    const ids = new Set<string>();
+    for (const entry of sourceEntries) {
+      const val = entry[column.filterByColumn];
+      if (typeof val === 'string' && val.trim() !== '') {
+        ids.add(val);
+      }
+    }
+
+    return ids.size > 0 ? ids : null;
+  }, [state]);
+
   const getTotalEntryCount = useCallback(() => {
     return Object.values(state).reduce((total, entries) => total + entries.length, 0);
   }, [state]);
@@ -470,7 +493,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
   }, [state]);
 
   // Convert state to deployment payload format
-  const convertToDeploymentPayload = useCallback((): DeploymentPayload => {
+  const convertToDeploymentPayload = useCallback((apiVersion: string = '65.0'): DeploymentPayload => {
     const steps: DeploymentPayload['steps'] = [];
 
     for (const step of pipelineConfig.steps) {
@@ -496,6 +519,18 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
           }
         }
 
+        // Resolve sameAs: if a field has no value but references another field, copy it
+        for (const col of step.columns) {
+          const key = col.sfField || col.name;
+          if (col.sameAs && (sfEntry[key] === undefined || sfEntry[key] === null)) {
+            const sourceCol = step.columns.find(c => c.name === col.sameAs);
+            const sourceKey = sourceCol ? (sourceCol.sfField || sourceCol.name) : col.sameAs;
+            if (sfEntry[sourceKey] !== undefined && sfEntry[sourceKey] !== null) {
+              sfEntry[key] = sfEntry[sourceKey];
+            }
+          }
+        }
+
         return sfEntry;
       });
 
@@ -503,9 +538,11 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
         stepId: step.id,
         stepName: step.name,
         apiName: step.apiName,
-        endpoint: step.endpoint || `/services/data/v60.0/sobjects/${step.apiName}/`,
+        endpoint: step.endpoint || `/services/data/v${apiVersion}/sobjects/${step.apiName}/`,
         method: step.method || 'POST',
         entries: sfEntries,
+        ignoredFields: step.columns.filter(c => c.ignoreFromPayload).map(c => c.sfField || c.name),
+        requiresInactivationBeforeDelete: step.requiresInactivationBeforeDelete,
       });
     }
 
@@ -546,6 +583,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     exportData,
     getStepConfig,
     getReferenceOptions,
+    getAllowedSalesforceIds,
     getTotalEntryCount,
     getEntryCountByStep,
     convertToDeploymentPayload,
@@ -555,7 +593,7 @@ export function ConfigDataProvider({ children }: { children: React.ReactNode }) 
     migrateDataForColumnChanges,
     recentlyChangedSteps,
     clearRecentlyChangedSteps,
-  }), [state, pipelineConfig, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, importData, exportData, getStepConfig, getReferenceOptions, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload, isHydrated, refreshPipelineConfig, updatePipelineConfig, migrateDataForColumnChanges, recentlyChangedSteps, clearRecentlyChangedSteps]);
+  }), [state, pipelineConfig, stepsByCategory, addEntry, updateEntry, deleteEntry, setEntries, clearAll, loadData, importData, exportData, getStepConfig, getReferenceOptions, getAllowedSalesforceIds, getTotalEntryCount, getEntryCountByStep, convertToDeploymentPayload, isHydrated, refreshPipelineConfig, updatePipelineConfig, migrateDataForColumnChanges, recentlyChangedSteps, clearRecentlyChangedSteps]);
 
   return (
     <ConfigDataContext.Provider value={value}>

@@ -304,6 +304,12 @@ function transformRecord(
 
   // Map basic fields
   for (const [excelField, sfField] of Object.entries(fieldMapping)) {
+    // Check if this field should be ignored from payload
+    const columnDef = step.columns.find(c => c.name === excelField);
+    if (columnDef?.ignoreFromPayload) {
+      continue;
+    }
+
     if (record[excelField] !== undefined && record[excelField] !== null && record[excelField] !== '') {
       let value = record[excelField];
 
@@ -323,6 +329,7 @@ function transformRecord(
 
   // Resolve parent ID mappings
   for (const mapping of step.parentIdMappings) {
+    
     const lookupValue = record[mapping.field];
 
     if (lookupValue && lookupValue !== '') {

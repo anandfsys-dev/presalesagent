@@ -5,19 +5,19 @@
  * The pipeline handles object hierarchies, execution order, and ID dependencies.
  *
  * Based on Salesforce Revenue Cloud API endpoints:
- * - /services/data/v60.0/sobjects/AttributePicklist/
- * - /services/data/v60.0/sobjects/AttributePicklistValue/
- * - /services/data/v60.0/sobjects/AttributeDefinition/
- * - /services/data/v60.0/sobjects/ProductClassification/
- * - /services/data/v60.0/sobjects/ProductClassificationAttr/
- * - /services/data/v60.0/sobjects/ProductCategory/
- * - /services/data/v60.0/sobjects/ProductCatalog/
- * - /services/data/v60.0/sobjects/Product2/
- * - /services/data/v60.0/sobjects/ProductCategoryProduct/
- * - /services/data/v60.0/sobjects/Pricebook2/
- * - /services/data/v60.0/sobjects/PricebookEntry/
- * - /services/data/v60.0/sobjects/ProductSellingModel/
- * - /services/data/v60.0/sobjects/ProductSellingModelOption/
+ * - /services/data/v65.0/sobjects/AttributePicklist/
+ * - /services/data/v65.0/sobjects/AttributePicklistValue/
+ * - /services/data/v65.0/sobjects/AttributeDefinition/
+ * - /services/data/v65.0/sobjects/ProductClassification/
+ * - /services/data/v65.0/sobjects/ProductClassificationAttr/
+ * - /services/data/v65.0/sobjects/ProductCategory/
+ * - /services/data/v65.0/sobjects/ProductCatalog/
+ * - /services/data/v65.0/sobjects/Product2/
+ * - /services/data/v65.0/sobjects/ProductCategoryProduct/
+ * - /services/data/v65.0/sobjects/Pricebook2/
+ * - /services/data/v65.0/sobjects/PricebookEntry/
+ * - /services/data/v65.0/sobjects/ProductSellingModel/
+ * - /services/data/v65.0/sobjects/ProductSellingModelOption/
  */
 
 import type { PipelineStep, PipelineConfig } from '@/types';
@@ -54,11 +54,13 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'picklists',
       name: 'Attribute Picklists',
       apiName: 'AttributePicklist',
-      endpoint: '/services/data/v60.0/sobjects/AttributePicklist/',
+      category: 'Attribute Management',
+      endpoint: '/services/data/v65.0/sobjects/AttributePicklist/',
       method: 'POST',
       worksheetName: 'AttributePicklists',
       order: 1,
       dependsOn: [],
+      requiresInactivationBeforeDelete: true,
       columns: [
         { name: 'Name', type: 'string', required: true, sfField: 'Name' },
         { name: 'Code', type: 'string', required: true, sfField: 'Code' },
@@ -72,11 +74,13 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'picklist_values',
       name: 'Attribute Picklist Values',
       apiName: 'AttributePicklistValue',
-      endpoint: '/services/data/v60.0/sobjects/AttributePicklistValue/',
+      category: 'Attribute Management',
+      endpoint: '/services/data/v65.0/sobjects/AttributePicklistValue/',
       method: 'POST',
       worksheetName: 'AttributePicklistValues',
       order: 2,
       dependsOn: ['picklists'],
+      requiresInactivationBeforeDelete: true,
       columns: [
         { name: 'PicklistId', type: 'reference', required: true, sfField: 'PicklistId', referenceTo: 'picklists', referenceDisplayField: 'Name' },
         { name: 'Name', type: 'string', required: true, sfField: 'Name' },
@@ -100,7 +104,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'attributes',
       name: 'Attribute Definitions',
       apiName: 'AttributeDefinition',
-      endpoint: '/services/data/v60.0/sobjects/AttributeDefinition/',
+      category: 'Attribute Management',
+      endpoint: '/services/data/v65.0/sobjects/AttributeDefinition/',
       method: 'POST',
       worksheetName: 'AttributeDefinitions',
       order: 3,
@@ -130,11 +135,13 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'classifications',
       name: 'Product Classifications',
       apiName: 'ProductClassification',
-      endpoint: '/services/data/v60.0/sobjects/ProductClassification/',
+      category: 'Product Classification',
+      endpoint: '/services/data/v65.0/sobjects/ProductClassification/',
       method: 'POST',
       worksheetName: 'ProductClassifications',
       order: 4,
       dependsOn: [],
+      requiresInactivationBeforeDelete: true,
       columns: [
         { name: 'Name', type: 'string', required: true, sfField: 'Name' },
         { name: 'Code', type: 'string', required: true, sfField: 'Code' },
@@ -147,11 +154,13 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'classification_attributes',
       name: 'Classification Attributes',
       apiName: 'ProductClassificationAttr',
-      endpoint: '/services/data/v60.0/sobjects/ProductClassificationAttr/',
+      category: 'Product Classification',
+      endpoint: '/services/data/v65.0/sobjects/ProductClassificationAttr/',
       method: 'POST',
       worksheetName: 'ClassificationAttributes',
       order: 5,
       dependsOn: ['classifications', 'attributes'],
+      requiresInactivationBeforeDelete: true,
       columns: [
         { name: 'ProductClassificationId', type: 'reference', required: true, sfField: 'ProductClassificationId', referenceTo: 'classifications', referenceDisplayField: 'Name' },
         { name: 'AttributeDefinitionId', type: 'reference', required: true, sfField: 'AttributeDefinitionId', referenceTo: 'attributes', referenceDisplayField: 'Name' },
@@ -183,7 +192,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'catalogs',
       name: 'Product Catalogs',
       apiName: 'ProductCatalog',
-      endpoint: '/services/data/v60.0/sobjects/ProductCatalog/',
+      category: 'Product Catalog',
+      endpoint: '/services/data/v65.0/sobjects/ProductCatalog/',
       method: 'POST',
       worksheetName: 'ProductCatalogs',
       order: 6,
@@ -200,7 +210,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'categories',
       name: 'Product Categories',
       apiName: 'ProductCategory',
-      endpoint: '/services/data/v60.0/sobjects/ProductCategory/',
+      category: 'Product Catalog',
+      endpoint: '/services/data/v65.0/sobjects/ProductCategory/',
       method: 'POST',
       worksheetName: 'ProductCategories',
       order: 7,
@@ -237,7 +248,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'products',
       name: 'Products',
       apiName: 'Product2',
-      endpoint: '/services/data/v60.0/sobjects/Product2/',
+      category: 'Products',
+      endpoint: '/services/data/v65.0/sobjects/Product2/',
       method: 'POST',
       worksheetName: 'Products',
       order: 8,
@@ -258,7 +270,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'category_products',
       name: 'Category Products',
       apiName: 'ProductCategoryProduct',
-      endpoint: '/services/data/v60.0/sobjects/ProductCategoryProduct/',
+      category: 'Product Catalog',
+      endpoint: '/services/data/v65.0/sobjects/ProductCategoryProduct/',
       method: 'POST',
       worksheetName: 'CategoryProducts',
       order: 9,
@@ -291,7 +304,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'product_classifications',
       name: 'Product Classification Links',
       apiName: 'Product2',
-      endpoint: '/services/data/v60.0/sobjects/Product2/',
+      category: 'Products',
+      endpoint: '/services/data/v65.0/sobjects/Product2/',
       method: 'PATCH',
       worksheetName: 'ProductClassificationLinks',
       order: 10,
@@ -324,7 +338,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'pricebooks',
       name: 'Price Books',
       apiName: 'Pricebook2',
-      endpoint: '/services/data/v60.0/sobjects/Pricebook2/',
+      category: 'Pricing',
+      endpoint: '/services/data/v65.0/sobjects/Pricebook2/',
       method: 'POST',
       worksheetName: 'PriceBooks',
       order: 11,
@@ -340,7 +355,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'pricebook_entries',
       name: 'Price Book Entries',
       apiName: 'PricebookEntry',
-      endpoint: '/services/data/v60.0/sobjects/PricebookEntry/',
+      category: 'Pricing',
+      endpoint: '/services/data/v65.0/sobjects/PricebookEntry/',
       method: 'POST',
       worksheetName: 'PriceBookEntries',
       order: 12,
@@ -375,11 +391,13 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'selling_models',
       name: 'Product Selling Models',
       apiName: 'ProductSellingModel',
-      endpoint: '/services/data/v60.0/sobjects/ProductSellingModel/',
+      category: 'Selling Models',
+      endpoint: '/services/data/v65.0/sobjects/ProductSellingModel/',
       method: 'POST',
       worksheetName: 'ProductSellingModels',
       order: 13,
       dependsOn: [],
+      requiresInactivationBeforeDelete: true,
       columns: [
         { name: 'Name', type: 'string', required: true, sfField: 'Name' },
         { name: 'SellingModelType', type: 'picklist', required: true, sfField: 'SellingModelType', picklistValues: ['OneTime', 'TermDefined', 'Evergreen'] },
@@ -394,7 +412,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
       id: 'selling_model_options',
       name: 'Selling Model Options',
       apiName: 'ProductSellingModelOption',
-      endpoint: '/services/data/v60.0/sobjects/ProductSellingModelOption/',
+      category: 'Selling Models',
+      endpoint: '/services/data/v65.0/sobjects/ProductSellingModelOption/',
       method: 'POST',
       worksheetName: 'SellingModelOptions',
       order: 14,
@@ -538,47 +557,17 @@ export function getExecutionOrder(config: PipelineConfig): PipelineStep[] {
  * Get steps grouped by category for UI display
  */
 export function getStepsByCategory(config: PipelineConfig): Record<string, PipelineStep[]> {
-  // Known step IDs for predefined categories
-  const knownStepIds = new Set([
-    'picklists', 'picklist_values', 'attributes',
-    'classifications', 'classification_attributes',
-    'catalogs', 'categories', 'category_products',
-    'products', 'product_classifications',
-    'pricebooks', 'pricebook_entries',
-    'selling_models', 'selling_model_options',
-  ]);
+  const categories: Record<string, PipelineStep[]> = {};
 
-  const categories: Record<string, PipelineStep[]> = {
-    'Attribute Management': config.steps.filter(s =>
-      ['picklists', 'picklist_values', 'attributes'].includes(s.id)
-    ),
-    'Product Classification': config.steps.filter(s =>
-      ['classifications', 'classification_attributes'].includes(s.id)
-    ),
-    'Product Catalog': config.steps.filter(s =>
-      ['catalogs', 'categories', 'category_products'].includes(s.id)
-    ),
-    'Products': config.steps.filter(s =>
-      ['products', 'product_classifications'].includes(s.id)
-    ),
-    'Pricing': config.steps.filter(s =>
-      ['pricebooks', 'pricebook_entries'].includes(s.id)
-    ),
-    'Selling Models': config.steps.filter(s =>
-      ['selling_models', 'selling_model_options'].includes(s.id)
-    ),
-  };
-
-  // Add any custom steps that don't fit in predefined categories
-  const customSteps = config.steps.filter(s => !knownStepIds.has(s.id));
-  if (customSteps.length > 0) {
-    categories['Custom Objects'] = customSteps;
+  for (const step of config.steps) {
+    const category = step.category || 'Custom Objects';
+    if (!categories[category]) {
+      categories[category] = [];
+    }
+    categories[category].push(step);
   }
 
-  // Filter out empty categories
-  return Object.fromEntries(
-    Object.entries(categories).filter(([, steps]) => steps.length > 0)
-  );
+  return categories;
 }
 
 /**

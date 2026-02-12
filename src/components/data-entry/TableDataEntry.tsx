@@ -46,44 +46,110 @@ interface TableDataEntryProps {
   connectionId?: string;
 }
 
-// Object Library - Left sidebar showing all steps
+// Object Library - Left sidebar showing all steps grouped by category
 function ObjectLibrary({
-  steps,
+  stepsByCategory,
   selectedStepId,
   onSelectStep,
   getEntryCount,
 }: {
-  steps: PipelineStep[];
+  stepsByCategory: Record<string, PipelineStep[]>;
   selectedStepId: string;
   onSelectStep: (stepId: string) => void;
   getEntryCount: (stepId: string) => number;
 }) {
+  // Start with all categories collapsed, except the one containing the selected step
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
+    const all = new Set(Object.keys(stepsByCategory));
+    for (const [cat, steps] of Object.entries(stepsByCategory)) {
+      if (steps.some(s => s.id === selectedStepId)) {
+        all.delete(cat);
+        break;
+      }
+    }
+    return all;
+  });
+
+  // When new categories appear, default them to collapsed
+  useEffect(() => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      for (const cat of Object.keys(stepsByCategory)) {
+        if (!prev.has(cat)) {
+          const containsSelected = stepsByCategory[cat]?.some(s => s.id === selectedStepId);
+          if (!containsSelected) {
+            next.add(cat);
+          }
+        }
+      }
+      return next;
+    });
+  }, [stepsByCategory, selectedStepId]);
+
+  const toggleCategory = (category: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="w-56 bg-white border-r border-gray-200 flex-shrink-0 flex flex-col h-full">
       <div className="px-4 py-3 border-b border-gray-200">
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Object Library</h3>
       </div>
-      <nav className="flex-1 overflow-y-auto py-2">
-        {steps.map((step) => {
-          const count = getEntryCount(step.id);
-          const isSelected = step.id === selectedStepId;
+      <nav className="flex-1 overflow-y-auto py-1">
+        {Object.entries(stepsByCategory).map(([category, steps]) => {
+          const isCollapsed = collapsedCategories.has(category);
+          const totalCount = steps.reduce((sum, s) => sum + getEntryCount(s.id), 0);
+
           return (
-            <button
-              key={step.id}
-              onClick={() => onSelectStep(step.id)}
-              className={`w-full text-left px-4 py-2.5 flex items-center justify-between transition-colors ${
-                isSelected
-                  ? 'bg-blue-50 border-r-2 border-blue-500 text-blue-700'
-                  : 'hover:bg-gray-50 text-gray-700'
-              }`}
-            >
-              <span className={`text-sm ${isSelected ? 'font-medium text-blue-700' : 'text-gray-700'}`}>
-                {step.name}
-              </span>
-              <span className={`text-sm ${isSelected ? 'text-blue-600 font-semibold' : 'text-gray-400'}`}>
-                {count}
-              </span>
-            </button>
+            <div key={category}>
+              <button
+                onClick={() => toggleCategory(category)}
+                className="w-full text-left px-4 py-2 flex items-center justify-between hover:bg-gray-100 border-b border-gray-100"
+              >
+                <span className="text-xs font-semibold text-gray-900 uppercase tracking-wider py-2">{category}</span>
+                <span className="flex items-center gap-1">
+                  <span className="text-xs text-gray-400">{totalCount}</span>
+                  <svg
+                    className={`w-3 h-3 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-90'}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </span>
+              </button>
+              {!isCollapsed && steps.map((step) => {
+                const count = getEntryCount(step.id);
+                const isSelected = step.id === selectedStepId;
+                return (
+                  <button
+                    key={step.id}
+                    onClick={() => onSelectStep(step.id)}
+                    className={`w-full text-left pl-6 pr-4 py-2.5 flex items-center justify-between transition-colors ${
+                      isSelected
+                        ? 'bg-blue-50 border-r-2 border-blue-500 text-blue-700'
+                        : 'hover:bg-gray-50 text-gray-700'
+                    }`}
+                  >
+                    <span className={`text-sm ${isSelected ? 'font-medium text-blue-700' : 'text-gray-700'}`}>
+                      {step.name}
+                    </span>
+                    <span className={`text-sm ${isSelected ? 'text-blue-600 font-semibold' : 'text-gray-400'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           );
         })}
       </nav>
@@ -107,6 +173,8 @@ function TableRow({
   onSaveAndNew,
   parentRefField,
   parentId,
+  onMultiSelectCreate,
+  getAllowedSalesforceIds,
 }: {
   step: PipelineStep;
   entry?: DataEntry;
@@ -122,6 +190,8 @@ function TableRow({
   onSaveAndNew?: (data: Record<string, unknown>) => void;
   parentRefField?: string;
   parentId?: string;
+  onMultiSelectCreate?: (colName: string, records: { id: string; name: string }[]) => void;
+  getAllowedSalesforceIds?: (col: ColumnDefinition) => Set<string> | null | undefined;
 }) {
   const [formData, setFormData] = useState<Record<string, unknown>>(() => {
     if (entry) {
@@ -137,6 +207,12 @@ function TableRow({
         defaults[col.name] = generateUniqueCode(step.name);
       }
     }
+    // Apply sameAs: copy value from the referenced field
+    for (const col of step.columns) {
+      if (col.sameAs && defaults[col.sameAs] !== undefined) {
+        defaults[col.name] = defaults[col.sameAs];
+      }
+    }
     if (parentRefField && parentId) {
       defaults[parentRefField] = parentId;
     }
@@ -145,7 +221,9 @@ function TableRow({
 
   const [userModifiedFields, setUserModifiedFields] = useState<Set<string>>(new Set());
   const [pickerColumn, setPickerColumn] = useState<ColumnDefinition | null>(null);
-  const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>({});
+  const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>(
+    () => (entry?._sfNames as Record<string, string>) || {}
+  );
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const rowRef = useRef<HTMLTableRowElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
@@ -215,6 +293,12 @@ function TableRow({
           }
         }
       }
+      // Propagate to sameAs fields
+      for (const col of step.columns) {
+        if (col.sameAs === name) {
+          newData[col.name] = value;
+        }
+      }
       return newData;
     });
   };
@@ -222,6 +306,10 @@ function TableRow({
   const handleExternalRefSelect = (colName: string, record: { id: string; name: string }) => {
     handleChange(colName, record.id);
     setExternalRefNames(prev => ({ ...prev, [colName]: record.name }));
+    setFormData(prev => ({
+      ...prev,
+      _sfNames: { ...(prev._sfNames as Record<string, string> || {}), [colName]: record.name },
+    }));
     setPickerColumn(null);
   };
 
@@ -289,6 +377,16 @@ function TableRow({
         );
       }
 
+      if (col.type === 'salesforce_id') {
+        const sfName = (formData._sfNames as Record<string, string> | undefined)?.[col.name];
+        return (
+          <td key={col.name} className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+            <div>{String(displayValue ?? '')}</div>
+            {sfName && <div className="text-xs text-green-600">{sfName}</div>}
+          </td>
+        );
+      }
+
       return (
         <td key={col.name} className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
           {String(displayValue ?? '')}
@@ -298,17 +396,20 @@ function TableRow({
 
     // Edit mode
     switch (col.type) {
-      case 'salesforce_id':
+      case 'salesforce_id': {
+        const allowedSet = getAllowedSalesforceIds?.(col);
+        const manualValue = (value as string) || '';
+        const isNotAllowed = allowedSet instanceof Set && manualValue.trim() !== '' && !allowedSet.has(manualValue);
         return (
           <td key={col.name} className="px-2 py-2">
             <div className="flex gap-1">
               <input
                 ref={isFirst ? firstInputRef : undefined}
                 type="text"
-                value={(value as string) || ''}
+                value={manualValue}
                 onChange={(e) => handleChange(col.name, e.target.value)}
                 placeholder={`${col.externalSobject || 'SF'} ID`}
-                className={`w-full px-2 py-1.5 border rounded text-sm font-mono focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${validationErrors[col.name] ? 'border-red-500' : 'border-gray-300'}`}
+                className={`w-full px-2 py-1.5 border rounded text-sm font-mono focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${validationErrors[col.name] ? 'border-red-500' : isNotAllowed ? 'border-amber-400' : 'border-gray-300'}`}
               />
               <button
                 type="button"
@@ -322,8 +423,12 @@ function TableRow({
                 </svg>
               </button>
             </div>
+            {isNotAllowed && (
+              <p className="text-[10px] text-amber-600 mt-0.5">This ID is not in the allowed set from the source step.</p>
+            )}
           </td>
         );
+      }
 
       case 'reference': {
         const options = getReferenceOptions(step.id, col);
@@ -472,6 +577,33 @@ function TableRow({
           sobjectName={pickerColumn.externalSobject}
           sobjectLabel={pickerColumn.externalSobject}
           onSelect={(record) => handleExternalRefSelect(pickerColumn.name, record)}
+          multiSelect={pickerColumn.multiSelect}
+          allowedIds={getAllowedSalesforceIds?.(pickerColumn)}
+          onMultiSelect={(records) => {
+            if (!records || records.length === 0) {
+              setPickerColumn(null);
+              return;
+            }
+
+            // 1. First record → update current row, preserving formData
+            const [first, ...rest] = records;
+            const updatedData = {
+              ...formData,
+              [pickerColumn.name]: first.id,
+              _sfNames: {
+                ...(formData._sfNames as Record<string, string> || {}),
+                [pickerColumn.name]: first.name,
+              },
+            };
+            onSave(updatedData);
+
+            // 2. Remaining records → create new blank rows (existing behavior)
+            if (rest.length > 0 && onMultiSelectCreate && pickerColumn.multiSelect) {
+              onMultiSelectCreate(pickerColumn.name, rest);
+            }
+
+            setPickerColumn(null);
+          }}
           onClose={() => setPickerColumn(null)}
           currentValue={formData[pickerColumn.name] as string}
         />
@@ -492,6 +624,9 @@ function DataTable({
   parentStep,
   parentEntry,
   refField,
+  externalIsAddingNew,
+  onSetIsAddingNew,
+  getAllowedSalesforceIds,
 }: {
   step: PipelineStep;
   entries: DataEntry[];
@@ -503,16 +638,22 @@ function DataTable({
   parentStep?: PipelineStep;
   parentEntry?: DataEntry;
   refField?: string;
+  externalIsAddingNew?: boolean;
+  onSetIsAddingNew?: (value: boolean) => void;
+  getAllowedSalesforceIds?: (col: ColumnDefinition) => Set<string> | null | undefined;
 }) {
-  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [isAddingNew, setIsAddingNew] = useState(false);
+  const [editingEntryIds, setEditingEntryIds] = useState<Set<string>>(new Set());
+  const [internalIsAddingNew, setInternalIsAddingNew] = useState(false);
+  const isAddingNew = externalIsAddingNew !== undefined ? externalIsAddingNew : internalIsAddingNew;
+  const setIsAddingNew = onSetIsAddingNew || setInternalIsAddingNew;
   const [formKey, setFormKey] = useState(0);
   const { confirm } = useConfirmDialog();
 
-  // Get visible columns (hide parent reference field)
+  // Get visible columns (hide parent reference field and hideInEntryForm columns)
   const visibleColumns = useMemo(() => {
     return step.columns.filter(col => {
       if (refField && col.name === refField) return false;
+      if (col.hideInEntryForm) return false;
       return true;
     });
   }, [step.columns, refField]);
@@ -526,7 +667,12 @@ function DataTable({
     } else {
       addEntry(step.id, data);
     }
-    setEditingEntryId(null);
+    setEditingEntryIds(prev => {
+      if (!entryId) return prev;
+      const next = new Set(prev);
+      next.delete(entryId);
+      return next;
+    });
     setIsAddingNew(false);
   };
 
@@ -549,8 +695,54 @@ function DataTable({
 
     if (confirmed) {
       deleteEntry(step.id, entryId);
-      setEditingEntryId(null);
+      setEditingEntryIds(prev => {
+        const next = new Set(prev);
+        next.delete(entryId);
+        return next;
+      });
     }
+  };
+
+  const handleMultiSelectCreate = (colName: string, records: { id: string; name: string }[]) => {
+    // Cancel any current new-entry form
+    setIsAddingNew(false);
+
+    const newIds: string[] = [];
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      const data: Record<string, unknown> = {};
+
+      // Build default values for new entries
+      for (const col of step.columns) {
+        if (col.defaultValue !== undefined) {
+          data[col.name] = col.defaultValue;
+        }
+        if (col.autogenerate) {
+          data[col.name] = generateUniqueCode(step.name) + String.fromCharCode(65 + (i % 26));
+        }
+      }
+      // Apply sameAs
+      for (const col of step.columns) {
+        if (col.sameAs && data[col.sameAs] !== undefined) {
+          data[col.name] = data[col.sameAs];
+        }
+      }
+
+      // Set the SF ID field
+      data[colName] = record.id;
+      data._sfNames = { [colName]: record.name };
+
+      // Set parent ref if applicable
+      if (refField && parentEntry) {
+        data[refField] = parentEntry._id;
+      }
+
+      const newId = addEntry(step.id, data);
+      newIds.push(newId);
+    }
+
+    // Put all new entries in edit mode
+    setEditingEntryIds(new Set(newIds));
   };
 
   return (
@@ -563,7 +755,19 @@ function DataTable({
                 key={col.name}
                 className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
               >
-                {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
+                <span className="flex items-center gap-1">
+                  {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
+                  {col.type === 'salesforce_id' && col.multiSelect && (
+                    <span
+                      className="text-blue-500"
+                      title="Multi-select: picking multiple records will create one entry per selection"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
+                    </span>
+                  )}
+                </span>
               </th>
             ))}
             <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -587,6 +791,8 @@ function DataTable({
               isNew={true}
               parentRefField={refField}
               parentId={parentEntry?._id}
+              onMultiSelectCreate={handleMultiSelectCreate}
+              getAllowedSalesforceIds={getAllowedSalesforceIds}
             />
           )}
 
@@ -597,14 +803,20 @@ function DataTable({
               step={step}
               entry={entry}
               visibleColumns={visibleColumns}
-              isEditing={editingEntryId === entry._id}
-              onStartEdit={() => setEditingEntryId(entry._id)}
+              isEditing={editingEntryIds.has(entry._id)}
+              onStartEdit={() => setEditingEntryIds(new Set([entry._id]))}
               onSave={(data) => handleSave(entry._id, data)}
-              onCancel={() => setEditingEntryId(null)}
+              onCancel={() => setEditingEntryIds(prev => {
+                const next = new Set(prev);
+                next.delete(entry._id);
+                return next;
+              })}
               onDelete={() => handleDelete(entry._id)}
               connectionId={connectionId}
               getReferenceOptions={getReferenceOptions}
               isNew={false}
+              onMultiSelectCreate={handleMultiSelectCreate}
+              getAllowedSalesforceIds={getAllowedSalesforceIds}
             />
           ))}
 
@@ -622,17 +834,6 @@ function DataTable({
         </tbody>
       </table>
 
-      {/* Add button for tables within parent groups */}
-      {parentEntry && !isAddingNew && (
-        <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
-          <button
-            onClick={() => setIsAddingNew(true)}
-            className="text-sm font-medium text-blue-600 hover:text-blue-700"
-          >
-            + Add New Value
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -649,6 +850,7 @@ function ParentGroupSection({
   addEntry,
   updateEntry,
   deleteEntry,
+  getAllowedSalesforceIds,
 }: {
   parentStep: PipelineStep;
   parentEntry: DataEntry;
@@ -660,8 +862,10 @@ function ParentGroupSection({
   addEntry: (stepId: string, data: Record<string, unknown>) => string;
   updateEntry: (stepId: string, entryId: string, data: Record<string, unknown>) => void;
   deleteEntry: (stepId: string, entryId: string) => void;
+  getAllowedSalesforceIds?: (col: ColumnDefinition) => Set<string> | null | undefined;
 }) {
   const parentName = getEntryDisplayName(parentEntry);
+  const [isAddingNew, setIsAddingNew] = useState(false);
 
   return (
     <div className="mb-6">
@@ -672,6 +876,17 @@ function ParentGroupSection({
         </svg>
         <span className="text-sm font-medium text-gray-500 uppercase">Parent {parentStep.name.replace(/s$/, '')}:</span>
         <span className="text-sm font-bold text-blue-600 uppercase">{parentName}</span>
+        <div className="ml-auto">
+          <button
+            onClick={() => setIsAddingNew(true)}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            ADD ENTRY
+          </button>
+        </div>
       </div>
 
       {/* Child Data Table */}
@@ -686,6 +901,9 @@ function ParentGroupSection({
         parentStep={parentStep}
         parentEntry={parentEntry}
         refField={refField}
+        externalIsAddingNew={isAddingNew}
+        onSetIsAddingNew={setIsAddingNew}
+        getAllowedSalesforceIds={getAllowedSalesforceIds}
       />
     </div>
   );
@@ -704,6 +922,7 @@ function StepContent({
   updateEntry,
   deleteEntry,
   onAddEntry,
+  getAllowedSalesforceIds,
 }: {
   step: PipelineStep;
   entries: DataEntry[];
@@ -716,6 +935,7 @@ function StepContent({
   updateEntry: (stepId: string, entryId: string, data: Record<string, unknown>) => void;
   deleteEntry: (stepId: string, entryId: string) => void;
   onAddEntry: () => void;
+  getAllowedSalesforceIds?: (col: ColumnDefinition) => Set<string> | null | undefined;
 }) {
   // If this step has a parent, show grouped view
   if (parentStep && parentEntries && refField) {
@@ -753,6 +973,7 @@ function StepContent({
               addEntry={addEntry}
               updateEntry={updateEntry}
               deleteEntry={deleteEntry}
+              getAllowedSalesforceIds={getAllowedSalesforceIds}
             />
           );
         })}
@@ -770,6 +991,7 @@ function StepContent({
       addEntry={addEntry}
       updateEntry={updateEntry}
       deleteEntry={deleteEntry}
+      getAllowedSalesforceIds={getAllowedSalesforceIds}
     />
   );
 }
@@ -779,8 +1001,10 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
   const {
     state,
     pipelineConfig,
+    stepsByCategory,
     getEntryCountByStep,
     getReferenceOptions,
+    getAllowedSalesforceIds,
     addEntry,
     updateEntry,
     deleteEntry,
@@ -870,7 +1094,7 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
     <div className="flex h-full overflow-hidden">
       {/* Object Library - Left Sidebar */}
       <ObjectLibrary
-        steps={pipelineConfig.steps}
+        stepsByCategory={stepsByCategory}
         selectedStepId={selectedStepId}
         onSelectStep={(stepId) => {
           setSelectedStepId(stepId);
@@ -917,12 +1141,24 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      {selectedStep.columns.map(col => (
+                      {selectedStep.columns.filter(col => !col.hideInEntryForm).map(col => (
                         <th
                           key={col.name}
                           className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
                         >
-                          {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
+                          <span className="flex items-center gap-1">
+                            {col.name.replace(/_/g, ' ')}{col.required ? ' *' : ''}
+                            {col.type === 'salesforce_id' && col.multiSelect && (
+                              <span
+                                className="text-blue-500"
+                                title="Multi-select: picking multiple records will create one entry per selection"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                              </span>
+                            )}
+                          </span>
                         </th>
                       ))}
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -934,7 +1170,7 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
                     <TableRow
                       key={`new-${formKey}`}
                       step={selectedStep}
-                      visibleColumns={selectedStep.columns}
+                      visibleColumns={selectedStep.columns.filter(col => !col.hideInEntryForm)}
                       isEditing={true}
                       onSave={(data) => {
                         addEntry(selectedStep.id, data);
@@ -948,6 +1184,36 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
                       connectionId={connectionId}
                       getReferenceOptions={getReferenceOptions}
                       isNew={true}
+                      getAllowedSalesforceIds={getAllowedSalesforceIds}
+                      onMultiSelectCreate={(colName, records) => {
+                        // Cancel the new-entry form
+                        setIsAddingNew(false);
+                        // Create entries for each selected record
+                        const newIds: string[] = [];
+                        for (let i = 0; i < records.length; i++) {
+                          const record = records[i];
+                          const data: Record<string, unknown> = {};
+                          for (const col of selectedStep.columns) {
+                            if (col.defaultValue !== undefined) {
+                              data[col.name] = col.defaultValue;
+                            }
+                            if (col.autogenerate) {
+                              data[col.name] = generateUniqueCode(selectedStep.name) + String.fromCharCode(65 + (i % 26));
+                            }
+                          }
+                          for (const col of selectedStep.columns) {
+                            if (col.sameAs && data[col.sameAs] !== undefined) {
+                              data[col.name] = data[col.sameAs];
+                            }
+                          }
+                          data[colName] = record.id;
+                          data._sfNames = { [colName]: record.name };
+                          // Note: root-level entries don't have parent ref
+                          newIds.push(addEntry(selectedStep.id, data));
+                        }
+                        // The entries are now in the main DataTable below and will appear there.
+                        // We don't set editingEntryIds here since the root new-entry form is separate from DataTable.
+                      }}
                     />
                   </tbody>
                 </table>
@@ -967,6 +1233,7 @@ export default function TableDataEntry({ connectionId }: TableDataEntryProps) {
             updateEntry={updateEntry}
             deleteEntry={deleteEntry}
             onAddEntry={() => setIsAddingNew(true)}
+            getAllowedSalesforceIds={getAllowedSalesforceIds}
           />
         </div>
       </div>

@@ -10,6 +10,7 @@ interface DeploymentRequest {
   connectionId: string;
   payload: DeploymentPayload;
   mode: 'full' | 'incremental' | 'validation_only';
+  apiVersion?: string;
 }
 
 // ID mappings for reference resolution
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
         }
 
         const body: DeploymentRequest = await request.json();
-        const { connectionId, payload, mode } = body;
+        const { connectionId, payload, mode, apiVersion = '65.0' } = body;
 
         // Fetch connection
         const { data: connection, error: connError } = await supabase
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
 
         // Initialize Salesforce client
         const accessToken = decryptToken(connection.access_token_encrypted);
-        const sfClient = new SalesforceClient(accessToken, connection.instance_url);
+        const sfClient = new SalesforceClient(accessToken, connection.instance_url, apiVersion);
 
         // Test connection first
         const isConnected = await sfClient.testConnection();
@@ -185,39 +186,55 @@ export async function POST(request: Request) {
               // {FieldName} placeholders in the configured endpoint template.
               const endpointForRecord = buildEndpointForRecord(step.endpoint, resolvedEntry);
 
-              // Make API call to create/update/upsert the record using the
-              // configured endpoint and HTTP method from the pipeline config.
-              const sfResponse = await sfClient.createRecord(
-                step.apiName,
-                resolvedEntry,
-                endpointForRecord,
-                step.method
-              );
+              
 
-              if (sfResponse.success && sfResponse.id) {
+                  // Prepare payload for Salesforce: copy resolved entry then strip any
+                  // fields configured as "ignoreFromPayload" (these may be present
+                  // to support endpoint placeholders but must not be sent in the body).
+                  const payloadEntry = { ...resolvedEntry };
+                  const ignoredFields: string[] = (step as any).ignoredFields || [];
+                  for (const f of ignoredFields) {
+                    if (f) delete payloadEntry[f];
+                  }
+
+                  // Make API call to create/update/upsert the record using the
+                  // configured endpoint and HTTP method from the pipeline config.
+                  const sfResponse = await sfClient.createRecord(
+                    step.apiName,
+                    payloadEntry,
+                    endpointForRecord,
+                    step.method
+                  );
+
+              if (sfResponse.success) {
                 result.successCount++;
 
-                // Store the ID mapping using internal _id if present
-                const internalId = entry._internalId as string;
-                if (internalId) {
-                  idMappings[step.stepId][internalId] = sfResponse.id;
-                }
-                // Also store by Name/Code for backward compatibility
-                if (entry.Name) {
-                  idMappings[step.stepId][entry.Name as string] = sfResponse.id;
-                }
-                if (entry.Code) {
-                  idMappings[step.stepId][entry.Code as string] = sfResponse.id;
+                // Store ID mappings only when an ID is returned (POST creates).
+                // PATCH/PUT returns 204 No Content with no ID.
+                if (sfResponse.id) {
+                  const internalId = entry._internalId as string;
+                  if (internalId) {
+                    idMappings[step.stepId][internalId] = sfResponse.id;
+                  }
+                  // Also store by Name/Code for backward compatibility
+                  if (entry.Name) {
+                    idMappings[step.stepId][entry.Name as string] = sfResponse.id;
+                  }
+                  if (entry.Code) {
+                    idMappings[step.stepId][entry.Code as string] = sfResponse.id;
+                  }
                 }
 
-                // Send record created event
+                // Send record created/updated event
                 send('record_created', {
                   stepId: step.stepId,
                   stepName: step.stepName,
                   objectType: step.apiName,
                   name: recordName,
-                  salesforceId: sfResponse.id,
+                  salesforceId: sfResponse.id || 'updated',
                   timestamp: new Date().toISOString(),
+                  method: step.method,
+                  requiresInactivationBeforeDelete: step.requiresInactivationBeforeDelete,
                 });
 
                 // Store in deployment details
@@ -230,7 +247,7 @@ export async function POST(request: Request) {
                     object_type: step.apiName,
                     object_name: recordName,
                     object_identifier: recordName,
-                    salesforce_id: sfResponse.id,
+                    salesforce_id: sfResponse.id || null,
                     status: 'success',
                     error_message: null,
                   });

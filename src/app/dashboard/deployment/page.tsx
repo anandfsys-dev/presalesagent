@@ -13,6 +13,7 @@ import {
   Badge,
   ProgressBar,
   Select,
+  useConfirmDialog,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useConfigData } from '@/contexts/ConfigDataContext';
@@ -75,6 +76,8 @@ interface CreatedRecord {
   name: string;
   salesforceId: string;
   timestamp: string;
+  method?: string;
+  requiresInactivationBeforeDelete?: boolean;
 }
 
 type DeploymentMode = 'full' | 'incremental' | 'validation_only';
@@ -84,6 +87,7 @@ export default function DeploymentPage() {
   const supabase = createClient();
   const { user } = useUser();
   const { state, pipelineConfig, getTotalEntryCount, convertToDeploymentPayload, stepsByCategory } = useConfigData();
+  const { confirm } = useConfirmDialog();
 
   const [connections, setConnections] = useState<SalesforceConnection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>('');
@@ -106,6 +110,29 @@ export default function DeploymentPage() {
     failureCount: number;
     skippedCount: number;
   } | null>(null);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [rollbackComplete, setRollbackComplete] = useState(false);
+  const [apiVersion, setApiVersion] = useState('65.0');
+
+  // Load user's API version setting
+  useEffect(() => {
+    const fetchApiVersion = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+
+      const { data } = await supabase
+        .from('user_settings')
+        .select('api_version')
+        .eq('user_id', authUser.id)
+        .single();
+
+      if (data?.api_version) {
+        setApiVersion(data.api_version);
+      }
+    };
+
+    fetchApiVersion();
+  }, [supabase]);
 
   // Load connections
   useEffect(() => {
@@ -296,7 +323,7 @@ export default function DeploymentPage() {
     setPostDeploymentResults([]);
     setResult(null);
 
-    const basePayload = convertToDeploymentPayload();
+    const basePayload = convertToDeploymentPayload(apiVersion);
     const payload = {
       ...basePayload,
       runPostDeploymentOperations: runPostDeployment === 'yes',
@@ -326,6 +353,7 @@ export default function DeploymentPage() {
           connectionId: connection.id,
           payload,
           mode: deploymentMode,
+          apiVersion,
         }),
       });
 
@@ -407,6 +435,104 @@ export default function DeploymentPage() {
   const handleCancel = () => {
     setIsDeploying(false);
     addLog('warning', 'Deployment cancelled by user');
+  };
+
+  const handleRollback = async () => {
+    if (!connection) return;
+    const confirmed = await confirm({
+      title: 'Rollback Deployment',
+      message: 'This will delete all created records from Salesforce. This action cannot be undone.',
+      confirmText: 'Rollback',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    setIsRollingBack(true);
+    setError(null);
+    addLog('info', 'Starting rollback...');
+
+    try {
+      // Only rollback POST-created records; PATCH/PUT steps are updates, not creates
+      const rollbackRecords = createdRecords
+        .filter(record => record.method === 'POST' || (!record.method && record.salesforceId !== 'updated'))
+        .map(record => ({
+          ...record,
+          requiresInactivationBeforeDelete: record.requiresInactivationBeforeDelete ?? false,
+        }));
+
+      const response = await fetch('/api/deployment/rollback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connectionId: connection.id,
+          records: rollbackRecords,
+          apiVersion,
+        }),
+      });
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No response stream available');
+      }
+
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.trim()) {
+            try {
+              const event = JSON.parse(buffer);
+              processRollbackEvent(event);
+            } catch {
+              // Ignore incomplete final chunk
+            }
+          }
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            processRollbackEvent(event);
+          } catch {
+            // Ignore parse errors
+          }
+        }
+      }
+
+      function processRollbackEvent(event: { type: string; data: unknown }) {
+        if (event.type === 'progress') {
+          setProgress(event.data as DeploymentProgress);
+        } else if (event.type === 'log') {
+          const logData = event.data as { level: DeploymentLog['level']; message: string };
+          addLog(logData.level, logData.message);
+        } else if (event.type === 'record_deleted') {
+          const deleted = event.data as { salesforceId: string };
+          setCreatedRecords(prev => prev.filter(r => r.salesforceId !== deleted.salesforceId));
+        } else if (event.type === 'complete') {
+          setRollbackComplete(true);
+        } else if (event.type === 'error') {
+          const errorData = event.data as { message: string };
+          setError(errorData.message);
+          addLog('error', errorData.message);
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Rollback failed';
+      setError(errorMessage);
+      addLog('error', errorMessage);
+    } finally {
+      setIsRollingBack(false);
+    }
   };
 
   // Get entry count by category
@@ -494,7 +620,7 @@ export default function DeploymentPage() {
                   value: c.id,
                   label: `${c.name} (${c.instance_url})`
                 }))}
-                disabled={isDeploying || connections.length === 0}
+                disabled={isDeploying || isRollingBack || connections.length === 0}
               />
               {connections.length === 0 && (
                 <p className="text-sm text-red-500 mt-1">
@@ -513,7 +639,7 @@ export default function DeploymentPage() {
                   { value: 'incremental', label: 'Incremental - Create/update changed objects' },
                   { value: 'validation_only', label: 'Validation Only - Dry run without creating' },
                 ]}
-                disabled={isDeploying}
+                disabled={isDeploying || isRollingBack}
               />
             </div>
 
@@ -526,7 +652,7 @@ export default function DeploymentPage() {
                   { value: 'yes', label: 'Yes - Execute configured post-deployment operations' },
                   { value: 'no', label: 'No - Skip post-deployment operations' },
                 ]}
-                disabled={isDeploying}
+                disabled={isDeploying || isRollingBack}
               />
             </div>
 
@@ -556,12 +682,37 @@ export default function DeploymentPage() {
                     setLogs([]);
                     setCreatedRecords([]);
                     setPostDeploymentResults([]);
+                    setRollbackComplete(false);
                   }}>
                     Reset
                   </Button>
                   <Button onClick={() => router.push('/dashboard/data-entry')}>
                     Edit Data
                   </Button>
+                  {!rollbackComplete && createdRecords.length > 0 && (
+                    <Button
+                      variant="danger"
+                      onClick={handleRollback}
+                      disabled={isRollingBack}
+                    >
+                      {isRollingBack ? (
+                        <span className="flex items-center gap-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Rolling Back...
+                        </span>
+                      ) : (
+                        'Rollback'
+                      )}
+                    </Button>
+                  )}
+                  {rollbackComplete && (
+                    <span className="flex items-center gap-2 text-sm text-green-600 font-medium px-3">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Rolled Back
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -569,8 +720,8 @@ export default function DeploymentPage() {
         </CardContent>
       </Card>
 
-      {/* Data Summary */}
-      <Card>
+      {/* Data Summary - hidden once deployment starts */}
+      {!isDeploying && !deploymentComplete && <Card>
         <CardHeader>
           <CardTitle>Data Summary - {totalEntries} Total Entries</CardTitle>
         </CardHeader>
@@ -616,25 +767,48 @@ export default function DeploymentPage() {
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
-      {/* Progress */}
+      {/* Progress & Result */}
       {(isDeploying || progress) && (
         <Card>
           <CardHeader>
             <CardTitle>
               <div className="flex items-center gap-3">
-                Deployment Progress
+                {deploymentComplete ? 'Deployment Complete' : 'Deployment Progress'}
                 {isDeploying && (
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div>
+                )}
+                {deploymentComplete && result && (
+                  result.success ? (
+                    <Badge variant="success">Success</Badge>
+                  ) : (
+                    <Badge variant="error">Completed with Errors</Badge>
+                  )
                 )}
               </div>
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/* Inline result summary when deployment is complete */}
+            {deploymentComplete && result && (
+              <div className="mb-4">
+                {result.success ? (
+                  <Alert variant="success" title="Deployment Successful">
+                    All {result.successCount} objects were created successfully in Salesforce.
+                  </Alert>
+                ) : (
+                  <Alert variant="warning" title="Deployment Completed with Issues">
+                    {result.successCount} succeeded, {result.failureCount} failed, {result.skippedCount} skipped.
+                    Review the logs below for details.
+                  </Alert>
+                )}
+              </div>
+            )}
             {progress && (
               <div className="space-y-4">
                 {/* Phase indicator */}
+                {!deploymentComplete && (
                 <div className="flex items-center gap-2 mb-4">
                   <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
                     progress.phase === 'post_deployment'
@@ -656,52 +830,56 @@ export default function DeploymentPage() {
                     Post-Deployment
                   </div>
                 </div>
+                )}
 
                 {/* Current operation display */}
-                {progress.phase === 'post_deployment' ? (
-                  <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-purple-900">
-                        Operation {(progress.currentOperationIndex || 0) + 1} of {progress.totalOperations}: {progress.currentOperation}
-                      </span>
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                        progress.operationType === 'wait' ? 'bg-gray-200 text-gray-700' :
-                        progress.operationType === 'GET' ? 'bg-blue-200 text-blue-700' :
-                        'bg-green-200 text-green-700'
-                      }`}>
-                        {progress.operationType}
-                      </span>
-                    </div>
-                    <ProgressBar
-                      value={(progress.currentOperationIndex || 0) + 1}
-                      max={progress.totalOperations || 1}
-                      showPercentage
-                    />
-                  </div>
-                ) : (
-                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-blue-900">
-                          Step {progress.currentStepIndex + 1} of {progress.totalSteps}:
+                {!deploymentComplete && (
+                  progress.phase === 'post_deployment' ? (
+                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-purple-900">
+                          Operation {(progress.currentOperationIndex || 0) + 1} of {progress.totalOperations}: {progress.currentOperation}
                         </span>
-                        <span className="text-sm font-semibold text-blue-900">
-                          {progress.currentStep}
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                          progress.operationType === 'wait' ? 'bg-gray-200 text-gray-700' :
+                          progress.operationType === 'GET' ? 'bg-blue-200 text-blue-700' :
+                          'bg-green-200 text-green-700'
+                        }`}>
+                          {progress.operationType}
                         </span>
                       </div>
-                      <span className="text-sm text-blue-600">
-                        {progress.processedRecords} / {progress.totalRecords} records
-                      </span>
+                      <ProgressBar
+                        value={(progress.currentOperationIndex || 0) + 1}
+                        max={progress.totalOperations || 1}
+                        showPercentage
+                      />
                     </div>
-                    <ProgressBar
-                      value={progress.processedRecords}
-                      max={progress.totalRecords}
-                      showPercentage
-                    />
-                  </div>
+                  ) : (
+                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-blue-900">
+                            Step {progress.currentStepIndex + 1} of {progress.totalSteps}:
+                          </span>
+                          <span className="text-sm font-semibold text-blue-900">
+                            {progress.currentStep}
+                          </span>
+                        </div>
+                        <span className="text-sm text-blue-600">
+                          {progress.processedRecords} / {progress.totalRecords} records
+                        </span>
+                      </div>
+                      <ProgressBar
+                        value={progress.processedRecords}
+                        max={progress.totalRecords}
+                        showPercentage
+                      />
+                    </div>
+                  )
                 )}
 
                 {/* Overall progress bar */}
+                {!deploymentComplete && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-medium text-gray-500">Overall Progress</span>
@@ -716,6 +894,7 @@ export default function DeploymentPage() {
                     />
                   </div>
                 </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-4">
                   <div className="bg-green-50 rounded-lg p-4 text-center">
@@ -732,36 +911,6 @@ export default function DeploymentPage() {
                   </div>
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Result Summary */}
-      {result && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              <div className="flex items-center gap-3">
-                Deployment Complete
-                {result.success ? (
-                  <Badge variant="success">Success</Badge>
-                ) : (
-                  <Badge variant="error">Completed with Errors</Badge>
-                )}
-              </div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {result.success ? (
-              <Alert variant="success" title="Deployment Successful">
-                All {result.successCount} objects were created successfully in Salesforce.
-              </Alert>
-            ) : (
-              <Alert variant="warning" title="Deployment Completed with Issues">
-                {result.successCount} succeeded, {result.failureCount} failed, {result.skippedCount} skipped.
-                Review the logs below for details.
-              </Alert>
             )}
           </CardContent>
         </Card>
@@ -812,34 +961,41 @@ export default function DeploymentPage() {
       {/* Created Records Log */}
       {createdRecords.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle>Created Records ({createdRecords.length})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto max-h-80 overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-white">
-                  <tr className="border-b border-gray-200">
-                    <th className="py-2 px-3 text-left font-medium text-gray-500">Step</th>
-                    <th className="py-2 px-3 text-left font-medium text-gray-500">Object Type</th>
-                    <th className="py-2 px-3 text-left font-medium text-gray-500">Name</th>
-                    <th className="py-2 px-3 text-left font-medium text-gray-500">Salesforce ID</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {createdRecords.map((record, idx) => (
-                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-2 px-3 text-gray-600">{record.stepName}</td>
-                      <td className="py-2 px-3">
-                        <Badge variant="default">{record.objectType}</Badge>
-                      </td>
-                      <td className="py-2 px-3 font-medium text-gray-900">{record.name}</td>
-                      <td className="py-2 px-3 font-mono text-xs text-blue-600">{record.salesforceId}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <CardContent className="p-0">
+            <details open={isDeploying || !deploymentComplete}>
+              <summary className="cursor-pointer select-none px-6 py-4 flex items-center justify-between hover:bg-gray-50">
+                <span className="font-semibold text-gray-900">Created Records ({createdRecords.length})</span>
+                <svg className="w-5 h-5 text-gray-400 transition-transform details-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="px-6 pb-4">
+                <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-white">
+                      <tr className="border-b border-gray-200">
+                        <th className="py-2 px-3 text-left font-medium text-gray-500">Step</th>
+                        <th className="py-2 px-3 text-left font-medium text-gray-500">Object Type</th>
+                        <th className="py-2 px-3 text-left font-medium text-gray-500">Name</th>
+                        <th className="py-2 px-3 text-left font-medium text-gray-500">Salesforce ID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {createdRecords.map((record, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 px-3 text-gray-600">{record.stepName}</td>
+                          <td className="py-2 px-3">
+                            <Badge variant="default">{record.objectType}</Badge>
+                          </td>
+                          <td className="py-2 px-3 font-medium text-gray-900">{record.name}</td>
+                          <td className="py-2 px-3 font-mono text-xs text-blue-600">{record.salesforceId}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
           </CardContent>
         </Card>
       )}
@@ -847,59 +1003,64 @@ export default function DeploymentPage() {
       {/* Post-Deployment Results */}
       {postDeploymentResults.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle>
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <CardContent className="p-0">
+            <details>
+              <summary className="cursor-pointer select-none px-6 py-4 flex items-center justify-between hover:bg-gray-50">
+                <span className="flex items-center gap-2 font-semibold text-gray-900">
+                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Post-Deployment Results ({postDeploymentResults.length})
+                </span>
+                <svg className="w-5 h-5 text-gray-400 transition-transform details-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
-                Post-Deployment Results ({postDeploymentResults.length})
-              </div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {postDeploymentResults.map((result, idx) => (
-                <div
-                  key={idx}
-                  className={`p-4 rounded-lg border ${
-                    result.success
-                      ? 'bg-green-50 border-green-200'
-                      : 'bg-red-50 border-red-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        result.type === 'GET' ? 'bg-blue-200 text-blue-700' : 'bg-green-200 text-green-700'
-                      }`}>
-                        {result.type}
-                      </span>
-                      <span className="font-medium text-gray-900">{result.operationName}</span>
+              </summary>
+              <div className="px-6 pb-4">
+                <div className="space-y-3">
+                  {postDeploymentResults.map((result, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-4 rounded-lg border ${
+                        result.success
+                          ? 'bg-green-50 border-green-200'
+                          : 'bg-red-50 border-red-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            result.type === 'GET' ? 'bg-blue-200 text-blue-700' : 'bg-green-200 text-green-700'
+                          }`}>
+                            {result.type}
+                          </span>
+                          <span className="font-medium text-gray-900">{result.operationName}</span>
+                        </div>
+                        <Badge variant={result.success ? 'success' : 'error'}>
+                          {result.success ? 'Success' : 'Failed'}
+                        </Badge>
+                      </div>
+                      <code className="text-xs bg-white/50 px-2 py-1 rounded text-gray-700 block truncate">
+                        {result.endpoint}
+                      </code>
+                      {result.error && (
+                        <p className="text-sm text-red-600 mt-2">{result.error}</p>
+                      )}
+                      {result.success && result.response !== undefined && (
+                        <details className="mt-2">
+                          <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                            View Response
+                          </summary>
+                          <pre className="text-xs bg-white/50 p-2 rounded mt-1 overflow-x-auto max-h-40">
+                            {JSON.stringify(result.response, null, 2)}
+                          </pre>
+                        </details>
+                      )}
                     </div>
-                    <Badge variant={result.success ? 'success' : 'error'}>
-                      {result.success ? 'Success' : 'Failed'}
-                    </Badge>
-                  </div>
-                  <code className="text-xs bg-white/50 px-2 py-1 rounded text-gray-700 block truncate">
-                    {result.endpoint}
-                  </code>
-                  {result.error && (
-                    <p className="text-sm text-red-600 mt-2">{result.error}</p>
-                  )}
-                  {result.success && result.response !== undefined && (
-                    <details className="mt-2">
-                      <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
-                        View Response
-                      </summary>
-                      <pre className="text-xs bg-white/50 p-2 rounded mt-1 overflow-x-auto max-h-40">
-                        {JSON.stringify(result.response, null, 2)}
-                      </pre>
-                    </details>
-                  )}
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            </details>
           </CardContent>
         </Card>
       )}
@@ -907,36 +1068,43 @@ export default function DeploymentPage() {
       {/* Deployment Logs */}
       {logs.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle>Deployment Logs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-gray-900 rounded-lg p-4 max-h-80 overflow-y-auto font-mono text-sm">
-              {logs.map((log, i) => (
-                <div key={i} className="flex gap-3 py-1">
-                  <span className="text-gray-500 flex-shrink-0">
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span
-                    className={`flex-shrink-0 w-16 ${
-                      log.level === 'error'
-                        ? 'text-red-400'
-                        : log.level === 'warning'
-                        ? 'text-yellow-400'
-                        : log.level === 'success'
-                        ? 'text-green-400'
-                        : 'text-blue-400'
-                    }`}
-                  >
-                    [{log.level.toUpperCase()}]
-                  </span>
-                  <span className="text-gray-100 flex-1">{log.message}</span>
-                  {log.salesforceId && (
-                    <span className="text-cyan-400 font-mono text-xs">{log.salesforceId}</span>
-                  )}
+          <CardContent className="p-0">
+            <details open={isDeploying || !deploymentComplete}>
+              <summary className="cursor-pointer select-none px-6 py-4 flex items-center justify-between hover:bg-gray-50">
+                <span className="font-semibold text-gray-900">Deployment Logs ({logs.length})</span>
+                <svg className="w-5 h-5 text-gray-400 transition-transform details-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="px-6 pb-4">
+                <div className="bg-gray-900 rounded-lg p-4 max-h-80 overflow-y-auto font-mono text-sm">
+                  {logs.map((log, i) => (
+                    <div key={i} className="flex gap-3 py-1">
+                      <span className="text-gray-500 flex-shrink-0">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </span>
+                      <span
+                        className={`flex-shrink-0 w-16 ${
+                          log.level === 'error'
+                            ? 'text-red-400'
+                            : log.level === 'warning'
+                            ? 'text-yellow-400'
+                            : log.level === 'success'
+                            ? 'text-green-400'
+                            : 'text-blue-400'
+                        }`}
+                      >
+                        [{log.level.toUpperCase()}]
+                      </span>
+                      <span className="text-gray-100 flex-1">{log.message}</span>
+                      {log.salesforceId && (
+                        <span className="text-cyan-400 font-mono text-xs">{log.salesforceId}</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            </details>
           </CardContent>
         </Card>
       )}

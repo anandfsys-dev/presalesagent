@@ -16,8 +16,9 @@ export type FieldType =
   | 'date'
   | 'currency'
   | 'picklist'
-  | 'reference'  // Reference to another object
-  | 'lookup';    // Lookup to parent object (auto-resolved)
+  | 'reference'      // Reference to another object
+  | 'lookup'         // Lookup to parent object (auto-resolved)
+  | 'salesforce_id'; // External Salesforce ID lookup
 
 // Field definition with enhanced metadata
 export interface SchemaField {
@@ -42,6 +43,14 @@ export interface SchemaField {
 
   // Salesforce mapping
   salesforceField: string;     // Salesforce API field name
+
+  // Additional properties from ColumnDefinition
+  isKey?: boolean;              // Unique constraint field
+  ignoreFromPayload?: boolean;  // Exclude from API payload (e.g., URL params)
+  sameAs?: string;              // Mirror value from another field
+  hideInEntryForm?: boolean;    // Hide from data entry UI
+  multiSelect?: boolean;        // Allow multi-select (for lookup fields)
+  externalSobject?: string;     // External SF object for lookup
 }
 
 // Relationship types between objects
@@ -102,6 +111,9 @@ export interface SchemaObject {
 
   // Parent relationships (objects this depends on)
   dependsOn?: string[];
+
+  // UI grouping category
+  category?: string;
 }
 
 // Loop definition for bulk creation

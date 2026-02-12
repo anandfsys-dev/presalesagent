@@ -52,3 +52,9 @@ next-env.d.ts
 
 # Supabase
 /supabase/.temp/
+
+# Screenshots
+/issues-screenshots/
+
+# Claude
+.claude/

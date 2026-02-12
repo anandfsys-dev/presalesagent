@@ -21,7 +21,9 @@ import '@xyflow/react/dist/style.css';
 import { ObjectNode } from './ObjectNode';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { Button } from '@/components/ui';
+import { createClient } from '@/lib/supabase/client';
 import type { PipelineStep, PipelineConfig } from '@/types';
+import { pipelineConfigToSchemaConfig } from '@/lib/schema/converter';
 
 interface PipelineEditorProps {
   initialConfig: PipelineConfig;
@@ -68,6 +70,13 @@ function configToFlow(config: PipelineConfig): { nodes: Node[]; edges: Edge[] } 
         parentIdMappings: step.parentIdMappings,
         endpoint: step.endpoint,
         method: step.method,
+        pluralName: step.pluralName,
+        identifierField: step.identifierField,
+        displayField: step.displayField,
+        isLoopable: step.isLoopable,
+        supportsHierarchy: step.supportsHierarchy,
+        category: step.category,
+        requiresInactivationBeforeDelete: step.requiresInactivationBeforeDelete,
       },
     });
 
@@ -93,7 +102,7 @@ function configToFlow(config: PipelineConfig): { nodes: Node[]; edges: Edge[] } 
 }
 
 // Convert React Flow back to pipeline config
-function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConfig): PipelineConfig {
+function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConfig, apiVersion: string = '65.0'): PipelineConfig {
   const steps: PipelineStep[] = nodes.map((node, index) => {
     const dependsOn = edges
       .filter((edge) => edge.target === node.id)
@@ -105,7 +114,7 @@ function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConf
       ? methodValue
       : 'POST';
 
-    return {
+    const step: PipelineStep = {
       id: node.id,
       name: node.data.label as string,
       apiName,
@@ -114,9 +123,20 @@ function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConf
       dependsOn,
       columns: (node.data.columns as PipelineStep['columns']) || [],
       parentIdMappings: (node.data.parentIdMappings as PipelineStep['parentIdMappings']) || [],
-      endpoint: (node.data.endpoint as string) || `/services/data/v60.0/sobjects/${apiName}/`,
+      endpoint: (node.data.endpoint as string) || `/services/data/v${apiVersion}/sobjects/${apiName}/`,
       method,
     };
+
+    // Pass through optional schema metadata
+    if (node.data.pluralName) step.pluralName = node.data.pluralName as string;
+    if (node.data.identifierField) step.identifierField = node.data.identifierField as string;
+    if (node.data.displayField) step.displayField = node.data.displayField as string;
+    if (node.data.isLoopable !== undefined) step.isLoopable = node.data.isLoopable as boolean;
+    if (node.data.supportsHierarchy !== undefined) step.supportsHierarchy = node.data.supportsHierarchy as boolean;
+    if (node.data.category) step.category = node.data.category as string;
+    if (node.data.requiresInactivationBeforeDelete) step.requiresInactivationBeforeDelete = true;
+
+    return step;
   });
 
   return {
@@ -126,6 +146,29 @@ function flowToConfig(nodes: Node[], edges: Edge[], originalConfig: PipelineConf
 }
 
 export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigChange, isFullscreen, onToggleFullscreen }: PipelineEditorProps) {
+  const supabase = createClient();
+  const [apiVersion, setApiVersion] = useState('65.0');
+
+  // Fetch user's API version setting on mount
+  useEffect(() => {
+    const fetchApiVersion = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from('user_settings')
+        .select('api_version')
+        .eq('user_id', user.id)
+        .single();
+
+      if (data?.api_version) {
+        setApiVersion(data.api_version);
+      }
+    };
+
+    fetchApiVersion();
+  }, [supabase]);
+
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
     () => configToFlow(initialConfig),
     [initialConfig]
@@ -259,17 +302,17 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigC
   );
 
   const handleSave = useCallback(() => {
-    const config = flowToConfig(nodes, edges, initialConfig);
+    const config = flowToConfig(nodes, edges, initialConfig, apiVersion);
     onSave(config);
-  }, [nodes, edges, initialConfig, onSave]);
+  }, [nodes, edges, initialConfig, onSave, apiVersion]);
 
   const handleGenerateCSV = useCallback(() => {
-    const config = flowToConfig(nodes, edges, initialConfig);
+    const config = flowToConfig(nodes, edges, initialConfig, apiVersion);
     onGenerateCSV(config);
-  }, [nodes, edges, initialConfig, onGenerateCSV]);
+  }, [nodes, edges, initialConfig, onGenerateCSV, apiVersion]);
 
   const handleExportConfig = useCallback(() => {
-    const config = flowToConfig(nodes, edges, initialConfig);
+    const config = flowToConfig(nodes, edges, initialConfig, apiVersion);
     const jsonString = JSON.stringify(config, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -280,7 +323,22 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigC
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [nodes, edges, initialConfig]);
+  }, [nodes, edges, initialConfig, apiVersion]);
+
+  const handleExportSchema = useCallback(() => {
+    const config = flowToConfig(nodes, edges, initialConfig, apiVersion);
+    const schema = pipelineConfigToSchemaConfig(config);
+    const jsonString = JSON.stringify(schema, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `schema-config-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [nodes, edges, initialConfig, apiVersion]);
 
   return (
     <div className={`w-full border border-gray-200 rounded-lg overflow-hidden bg-white flex flex-col ${
@@ -310,22 +368,16 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigC
               )}
             </Button>
           )}
-          <span className="text-xs text-gray-500 ml-4">
+          <span className="text-xs text-gray-500 ml-4 hidden lg:inline">
             Drag nodes to reposition • Connect nodes to define dependencies • Click a node to edit
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={handleExportConfig} variant="outline" size="sm">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Button onClick={handleExportSchema} variant="outline" size="sm">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            Export JSON
-          </Button>
-          <Button onClick={handleGenerateCSV} variant="outline" size="sm">
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Generate CSV
+            Export Schema
           </Button>
           <Button onClick={handleSave} size="sm">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -371,6 +423,7 @@ export function PipelineEditor({ initialConfig, onSave, onGenerateCSV, onConfigC
           onUpdate={handleNodeUpdate}
           onDelete={handleNodeDelete}
           onClose={() => setSelectedNode(null)}
+          apiVersion={apiVersion}
         />
       )}
 

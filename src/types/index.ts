@@ -48,6 +48,15 @@ export interface PipelineStep {
   dependsOn: string[]; // IDs of steps this depends on
   columns: ColumnDefinition[]; // Column/field definitions
   parentIdMappings: ParentIdMapping[]; // How to map parent IDs
+
+  // Optional schema metadata (for schema export)
+  pluralName?: string;
+  identifierField?: string;
+  displayField?: string;
+  isLoopable?: boolean;
+  supportsHierarchy?: boolean;
+  category?: string; // UI grouping category (e.g., "Attribute Management", "Pricing")
+  requiresInactivationBeforeDelete?: boolean; // If true, rollback will PATCH Status→Inactive before DELETE
 }
 
 export interface ColumnDefinition {
@@ -63,6 +72,12 @@ export interface ColumnDefinition {
   externalSobject?: string; // For salesforce_id type, the Salesforce object API name (e.g., 'Account', 'Product2')
   autogenerate?: boolean; // If true, auto-generate unique codes/SKUs for this field
   isKey?: boolean; // If true, this field must be unique (Salesforce doesn't allow duplicates)
+  ignoreFromPayload?: boolean; // If true, this field is excluded from the request payload (useful for URL parameters)
+  sameAs?: string; // Name of another column whose value this field mirrors
+  hideInEntryForm?: boolean; // If true, hide from data entry UI (still included in payload)
+  multiSelect?: boolean; // For salesforce_id: allow picking multiple records (creates one entry per selection)
+  filterByStep?: string; // Step ID whose entries provide the allowed IDs (for salesforce_id filtering)
+  filterByColumn?: string; // Column name within that step to extract IDs from (for salesforce_id filtering)
 }
 
 export interface ParentIdMapping {

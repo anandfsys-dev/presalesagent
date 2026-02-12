@@ -165,12 +165,20 @@ function EntryNode({ data, selected }: { data: EntryNodeData; selected: boolean 
         {displayFields.map(col => {
           const value = entry[col.name];
           if (value === undefined || value === null || value === '') return null;
+          const sfName = (entry._sfNames as Record<string, string> | undefined)?.[col.name];
           return (
-            <div key={col.name} className="flex items-center gap-2 text-xs">
-              <span className="text-gray-500 flex-shrink-0">{col.name}:</span>
-              <span className="text-gray-800 truncate" title={String(value)}>
-                {getDisplayValue(col, value)}
-              </span>
+            <div key={col.name} className="flex flex-col text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 flex-shrink-0">{col.name}:</span>
+                <span className="text-gray-800 truncate" title={String(value)}>
+                  {getDisplayValue(col, value)}
+                </span>
+              </div>
+              {sfName && (
+                <span className="text-[10px] text-green-600 truncate pl-1" title={sfName}>
+                  {sfName}
+                </span>
+              )}
             </div>
           );
         })}
@@ -232,14 +240,16 @@ function EditPanel({
   onSave,
   onClose,
   connectionId,
+  onMultiSelectCreate,
 }: {
   entry: DataEntry | null;
   step: PipelineStep | null;
   onSave: (stepId: string, entryId: string, data: Record<string, unknown>) => void;
   onClose: () => void;
   connectionId?: string;
+  onMultiSelectCreate?: (stepId: string, colName: string, records: { id: string; name: string }[]) => void;
 }) {
-  const { getReferenceOptions } = useConfigData();
+  const { getReferenceOptions, getAllowedSalesforceIds } = useConfigData();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [pickerColumn, setPickerColumn] = useState<ColumnDefinition | null>(null);
   const [externalRefNames, setExternalRefNames] = useState<Record<string, string>>({});
@@ -259,6 +269,7 @@ function EditPanel({
       }
       setFormData(data);
       setUserModifiedFields(new Set());
+      setExternalRefNames((entry._sfNames as Record<string, string>) || {});
     }
   }, [entry, step]);
 
@@ -286,6 +297,13 @@ function EditPanel({
         }
       }
 
+      // Propagate to sameAs fields
+      for (const col of step.columns) {
+        if (col.sameAs === name) {
+          newData[col.name] = value;
+        }
+      }
+
       return newData;
     });
   };
@@ -299,6 +317,10 @@ function EditPanel({
   const handleExternalRefSelect = (colName: string, record: { id: string; name: string }) => {
     handleChange(colName, record.id);
     setExternalRefNames(prev => ({ ...prev, [colName]: record.name }));
+    setFormData(prev => ({
+      ...prev,
+      _sfNames: { ...(prev._sfNames as Record<string, string> || {}), [colName]: record.name },
+    }));
     setPickerColumn(null);
   };
 
@@ -308,15 +330,28 @@ function EditPanel({
     switch (col.type) {
       case 'salesforce_id': {
         // Salesforce ID - external Salesforce record lookup
+        const allowedSet = getAllowedSalesforceIds(col);
+        const manualVal = (value as string) || '';
+        const isNotAllowed = allowedSet instanceof Set && manualVal.trim() !== '' && !allowedSet.has(manualVal);
         return (
           <div key={col.name}>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="flex items-center gap-1 text-sm font-medium text-gray-700 mb-1">
               {col.name.replace(/_/g, ' ')} {col.required && <span className="text-red-500">*</span>}
+              {col.multiSelect && (
+                <span
+                  className="text-blue-500"
+                  title="Multi-select: picking multiple records will create one entry per selection"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </span>
+              )}
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
-                value={(value as string) || ''}
+                value={manualVal}
                 onChange={(e) => {
                   handleChange(col.name, e.target.value);
                   if (externalRefNames[col.name]) {
@@ -328,7 +363,7 @@ function EditPanel({
                   }
                 }}
                 placeholder={`Enter ${col.externalSobject || 'Salesforce'} ID`}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`flex-1 px-3 py-2 border rounded-md text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${isNotAllowed ? 'border-amber-400' : 'border-gray-300'}`}
               />
               <button
                 type="button"
@@ -343,6 +378,11 @@ function EditPanel({
                 Get
               </button>
             </div>
+            {isNotAllowed && (
+              <p className="text-xs text-amber-600 mt-1">
+                This ID is not in the allowed set from the source step.
+              </p>
+            )}
             {externalRefNames[col.name] && (
               <p className="text-xs text-green-600 mt-1">
                 Selected: {externalRefNames[col.name]}
@@ -462,7 +502,7 @@ function EditPanel({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 space-y-4">
-          {step.columns.map(renderField)}
+          {step.columns.filter(col => !col.hideInEntryForm).map(renderField)}
         </form>
         <div className="px-4 py-3 border-t border-gray-200 flex gap-2">
           <Button type="button" variant="outline" onClick={onClose} className="flex-1">
@@ -481,6 +521,33 @@ function EditPanel({
           sobjectName={pickerColumn.externalSobject}
           sobjectLabel={pickerColumn.externalSobject}
           onSelect={(record) => handleExternalRefSelect(pickerColumn.name, record)}
+          multiSelect={pickerColumn.multiSelect}
+          allowedIds={getAllowedSalesforceIds(pickerColumn)}
+          onMultiSelect={(records) => {
+            if (!records || records.length === 0) {
+              setPickerColumn(null);
+              return;
+            }
+
+            // 1. First record → update current entry, preserving formData
+            const [first, ...rest] = records;
+            const updatedData = {
+              ...formData,
+              [pickerColumn.name]: first.id,
+              _sfNames: {
+                ...(formData._sfNames as Record<string, string> || {}),
+                [pickerColumn.name]: first.name,
+              },
+            };
+            onSave(step.id, entry._id, updatedData);
+
+            // 2. Remaining records → create new blank entries (existing behavior)
+            if (rest.length > 0 && onMultiSelectCreate && pickerColumn.multiSelect) {
+              onMultiSelectCreate(step.id, pickerColumn.name, rest);
+            }
+
+            setPickerColumn(null);
+          }}
           onClose={() => setPickerColumn(null)}
           currentValue={formData[pickerColumn.name] as string}
         />
@@ -650,6 +717,12 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
         initialData[col.name] = generateUniqueCode(childStep.name);
       }
     }
+    // Apply sameAs: copy value from the referenced field
+    for (const col of childStep.columns) {
+      if (col.sameAs && initialData[col.sameAs] !== undefined) {
+        initialData[col.name] = initialData[col.sameAs];
+      }
+    }
 
     // Set the reference field to point to parent
     initialData[refField] = parentEntry._id;
@@ -670,6 +743,48 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
   const handleSave = useCallback((stepId: string, entryId: string, data: Record<string, unknown>) => {
     updateEntry(stepId, entryId, data);
   }, [updateEntry]);
+
+  // Handle multi-select create from edit panel
+  const handleMultiSelectCreate = useCallback((stepId: string, colName: string, records: { id: string; name: string }[]) => {
+    const step = pipelineConfig.steps.find(s => s.id === stepId);
+    if (!step) return;
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      const initialData: Record<string, unknown> = {};
+
+      for (const col of step.columns) {
+        if (col.defaultValue !== undefined) {
+          initialData[col.name] = col.defaultValue;
+        }
+        if (col.autogenerate) {
+          initialData[col.name] = generateUniqueCode(step.name) + String.fromCharCode(65 + (i % 26));
+        }
+      }
+      for (const col of step.columns) {
+        if (col.sameAs && initialData[col.sameAs] !== undefined) {
+          initialData[col.name] = initialData[col.sameAs];
+        }
+      }
+
+      initialData[colName] = record.id;
+      initialData._sfNames = { [colName]: record.name };
+
+      // Copy parent reference from the current editing entry if it has one
+      if (editingEntry) {
+        for (const col of step.columns) {
+          if (col.type === 'reference' && editingEntry.entry[col.name]) {
+            initialData[col.name] = editingEntry.entry[col.name];
+          }
+        }
+      }
+
+      addEntry(stepId, initialData);
+    }
+
+    // Close the edit panel
+    setEditingEntry(null);
+  }, [pipelineConfig, addEntry, editingEntry]);
 
   // Convert state to nodes and edges
   useEffect(() => {
@@ -798,6 +913,12 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
         initialData[col.name] = generateUniqueCode(step.name);
       }
     }
+    // Apply sameAs: copy value from the referenced field
+    for (const col of step.columns) {
+      if (col.sameAs && initialData[col.sameAs] !== undefined) {
+        initialData[col.name] = initialData[col.sameAs];
+      }
+    }
 
     // Add the entry
     const newId = addEntry(step.id, initialData);
@@ -908,6 +1029,7 @@ function VisualDataBuilderInner({ isFullscreen, onToggleFullscreen, connectionId
           onSave={handleSave}
           onClose={() => setEditingEntry(null)}
           connectionId={connectionId}
+          onMultiSelectCreate={handleMultiSelectCreate}
         />
       )}
     </div>

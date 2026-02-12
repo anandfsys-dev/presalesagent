@@ -27,7 +27,7 @@ interface UserSettings {
 }
 
 const defaultSettings: UserSettings = {
-  api_version: '59.0',
+  api_version: '65.0',
   batch_size: 200,
   max_retries: 3,
   session_timeout: 1800,
@@ -95,7 +95,7 @@ export default function SettingsPage() {
           user_id: user.id,
           ...settings,
           updated_at: new Date().toISOString(),
-        });
+        }, { onConflict: 'user_id' });
 
       if (upsertError) throw upsertError;
 
@@ -121,7 +121,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex-1 overflow-y-auto p-6 pb-12 space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
@@ -154,9 +154,9 @@ export default function SettingsPage() {
               value={settings.api_version}
               onChange={(e) => setSettings({ ...settings, api_version: e.target.value })}
               options={[
-                { value: '59.0', label: 'v59.0 (Winter \'24)' },
-                { value: '60.0', label: 'v60.0 (Spring \'24)' },
-                { value: '61.0', label: 'v61.0 (Summer \'24)' },
+                { value: '64.0', label: 'v64.0 (Spring \'25)' },
+                { value: '65.0', label: 'v65.0 (Summer \'25)' },
+                { value: '66.0', label: 'v66.0 (Winter \'26)' },
               ]}
               helperText="Salesforce REST API version to use"
             />
